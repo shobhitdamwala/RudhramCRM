@@ -8,7 +8,7 @@ import '../utils/snackbar_helper.dart';
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
 
 class AddEditTaskScreen extends StatefulWidget {
-  final dynamic task;
+  final Map<String, dynamic>? task;
   const AddEditTaskScreen({Key? key, this.task}) : super(key: key);
 
   @override
@@ -17,41 +17,54 @@ class AddEditTaskScreen extends StatefulWidget {
 
 class _AddEditTaskScreenState extends State<AddEditTaskScreen> {
   final _formKey = GlobalKey<FormState>();
-  final TextEditingController _title = TextEditingController();
-  final TextEditingController _description = TextEditingController();
+  final TextEditingController _titleCtrl = TextEditingController();
+  final TextEditingController _descriptionCtrl = TextEditingController();
+  String? _selectedServiceId;
+  List<dynamic> serviceOfferings = [];
+
   DateTime? _deadline;
 
-  String _status = "open";
-  String _priority = "medium";
-  String? _projectId;
-  String? _clientId;
-  String? _subCompanyId;
-  List<String> _assignedTo = [];
+  String? _selectedClientId;
+  Map<String, dynamic>? _selectedClient;
 
-  List<dynamic> projects = [];
+  String? _selectedStatus;
+  String? _selectedPriority;
+  List<String> _selectedTeamMembers = [];
+
   List<dynamic> clients = [];
-  List<dynamic> subCompanies = [];
   List<dynamic> teamMembers = [];
+  List<dynamic> clientServices = [];
+  List<dynamic> clientSubCompanies = [];
+
+  bool isLoading = false;
+  bool isEditing = false;
 
   @override
   void initState() {
     super.initState();
-    fetchDropdownData();
-    if (widget.task != null) {
-      _title.text = widget.task['title'] ?? '';
-      _description.text = widget.task['description'] ?? '';
-      _status = widget.task['status'] ?? 'open';
-      _priority = widget.task['priority'] ?? 'medium';
-      if (widget.task['deadline'] != null) {
-        _deadline = DateTime.parse(widget.task['deadline']);
+    isEditing = widget.task != null;
+    _fetchClients();
+    _fetchTeamMembers();
+
+    if (isEditing) {
+      _titleCtrl.text = widget.task?['title'] ?? '';
+      _descriptionCtrl.text = widget.task?['description'] ?? '';
+      _selectedStatus = widget.task?['status'];
+      _selectedPriority = widget.task?['priority'];
+      _deadline = widget.task?['deadline'] != null
+          ? DateTime.parse(widget.task!['deadline'])
+          : null;
+
+      if (widget.task?['client'] != null) {
+        _selectedClientId = widget.task?['client']['_id'];
+        _selectedClient = widget.task?['client'];
+        _updateClientDependentFields();
       }
-      _projectId = widget.task['project']?['_id'];
-      _clientId = widget.task['client']?['_id'];
-      _subCompanyId = widget.task['subCompany']?['_id'];
-      if (widget.task['assignedTo'] != null) {
-        _assignedTo = (widget.task['assignedTo'] as List)
-            .map((e) => e['_id'] as String)
-            .toList();
+
+      if (widget.task?['assignedTo'] != null) {
+        _selectedTeamMembers = List<String>.from(
+          widget.task?['assignedTo'].map((m) => m['_id']),
+        );
       }
     }
   }
@@ -63,101 +76,105 @@ class _AddEditTaskScreenState extends State<AddEditTaskScreen> {
         : token.trim();
   }
 
-  Future<void> fetchDropdownData() async {
+  Future<void> _fetchClients() async {
     final prefs = await SharedPreferences.getInstance();
     final token = _cleanToken(prefs.getString('auth_token'));
+    final res = await http.get(
+      Uri.parse("${ApiConfig.baseUrl}/client/getclient"),
+      headers: {"Authorization": "Bearer $token"},
+    );
 
-    Future<List<dynamic>> fetch(String endpoint) async {
-      final res = await http.get(
-        Uri.parse("${ApiConfig.baseUrl}/$endpoint"),
-        headers: {"Authorization": "Bearer $token"},
-      );
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        return data['data'] ?? [];
-      }
-      return [];
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      setState(() => clients = data['data'] ?? []);
     }
-
-    final results = await Future.wait([
-      fetch("project/getproject"),
-      fetch("client/getclient"),
-      fetch("subcompany/getsubcompany"),
-      fetch("user/team-members"),
-    ]);
-
-    setState(() {
-      projects = results[0];
-      clients = results[1];
-      subCompanies = results[2];
-      teamMembers = results[3];
-    });
   }
 
-  Future<void> saveTask() async {
+  Future<void> _fetchTeamMembers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = _cleanToken(prefs.getString('auth_token'));
+    final res = await http.get(
+      Uri.parse("${ApiConfig.baseUrl}/user/team-members"),
+      headers: {"Authorization": "Bearer $token"},
+    );
+
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      setState(() => teamMembers = data['teamMembers'] ?? []);
+    }
+  }
+
+  void _updateClientDependentFields() {
+    if (_selectedClient == null) return;
+
+    final meta = _selectedClient!['meta'] ?? {};
+    clientServices = meta['chosenServices'] ?? [];
+    clientSubCompanies = meta['subCompanyNames'] ?? [];
+
+    // Reset service & offerings when client changes
+    _selectedServiceId = null;
+    serviceOfferings = [];
+  }
+
+  Future<void> _saveTask() async {
     if (!_formKey.currentState!.validate()) return;
 
     final prefs = await SharedPreferences.getInstance();
     final token = _cleanToken(prefs.getString('auth_token'));
 
-    final Map<String, dynamic> body = {
-      'title': _title.text.trim(),
-      'description': _description.text.trim(),
-      'status': _status,
-      'priority': _priority,
-      'project': _projectId,
-      'client': _clientId,
-      'subCompany': _subCompanyId,
-      'assignedTo': _assignedTo,
-      'deadline': _deadline?.toIso8601String(),
+    final body = {
+      "title": _titleCtrl.text.trim(),
+      "description": _descriptionCtrl.text.trim(),
+      "client": _selectedClientId,
+      "assignedTo": _selectedTeamMembers,
+      "status": _selectedStatus,
+      "priority": _selectedPriority,
+      "deadline": _deadline?.toIso8601String(),
     };
 
-    try {
-      final url = widget.task == null
-          ? Uri.parse("${ApiConfig.baseUrl}/task/addtask")
-          : Uri.parse("${ApiConfig.baseUrl}/task/${widget.task['_id']}");
+    setState(() => isLoading = true);
 
-      final res = widget.task == null
-          ? await http.post(
-              url,
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": "Bearer $token",
-              },
-              body: jsonEncode(body),
-            )
-          : await http.put(
-              url,
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": "Bearer $token",
-              },
-              body: jsonEncode(body),
-            );
+    final url = isEditing
+        ? Uri.parse("${ApiConfig.baseUrl}/task/${widget.task!['_id']}")
+        : Uri.parse("${ApiConfig.baseUrl}/task/addtask");
 
-      if (res.statusCode == 200 || res.statusCode == 201) {
-        SnackbarHelper.show(
-          context,
-          title: 'Success',
-          message: widget.task == null
-              ? 'Task added successfully'
-              : 'Task updated successfully',
-          type: ContentType.success,
-        );
-        Navigator.pop(context, true);
-      } else {
-        SnackbarHelper.show(
-          context,
-          title: 'Error',
-          message: 'Failed to save task',
-          type: ContentType.failure,
-        );
-      }
-    } catch (e) {
+    final res = await (isEditing
+        ? http.put(
+            url,
+            headers: {
+              "Authorization": "Bearer $token",
+              "Content-Type": "application/json",
+            },
+            body: jsonEncode(body),
+          )
+        : http.post(
+            url,
+            headers: {
+              "Authorization": "Bearer $token",
+              "Content-Type": "application/json",
+            },
+            body: jsonEncode(body),
+          ));
+
+    setState(() => isLoading = false);
+
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      if (!mounted) return;
+      SnackbarHelper.show(
+        context,
+        title: 'Success',
+        message: isEditing
+            ? 'Task updated successfully'
+            : 'Task created successfully',
+        type: ContentType.success,
+      );
+      Navigator.pop(context, true);
+    } else {
+      final err = jsonDecode(res.body);
       SnackbarHelper.show(
         context,
         title: 'Error',
-        message: 'Error: $e',
+        message: err['message'] ?? 'Failed to save task',
         type: ContentType.failure,
       );
     }
@@ -167,221 +184,389 @@ class _AddEditTaskScreenState extends State<AddEditTaskScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.task == null ? "Add Task" : "Edit Task"),
+        title: Text(isEditing ? "Edit Task" : "Add Task"),
         backgroundColor: AppColors.primaryColor,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              children: [
-                TextFormField(
-                  controller: _title,
-                  decoration: const InputDecoration(
-                    labelText: "Title",
-                    prefixIcon: Icon(Icons.title),
-                  ),
-                  validator: (v) => v == null || v.isEmpty ? "Required" : null,
-                ),
-                const SizedBox(height: 15),
-                TextFormField(
-                  controller: _description,
-                  decoration: const InputDecoration(
-                    labelText: "Description",
-                    prefixIcon: Icon(Icons.description),
-                  ),
-                  maxLines: 3,
-                ),
-                const SizedBox(height: 15),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  children: [
+                    _buildTextField(_titleCtrl, "Title", Icons.title),
+                    _buildTextField(
+                      _descriptionCtrl,
+                      "Description",
+                      Icons.description,
+                      maxLines: 3,
+                    ),
+                    const SizedBox(height: 16),
 
-                // Project
-                DropdownButtonFormField<String>(
-                  value: _projectId,
-                  decoration: const InputDecoration(
-                    labelText: "Project",
-                    prefixIcon: Icon(Icons.work_outline),
-                  ),
-                  items: projects
-                      .map<DropdownMenuItem<String>>(
-                        (e) => DropdownMenuItem<String>(
-                          value: e['_id']?.toString(),
-                          child: Text(e['title'] ?? ''),
+                    // 👉 Select Client
+                    DropdownButtonFormField<String>(
+                      value: _selectedClientId,
+                      decoration: _inputDecoration(
+                        "Select Client",
+                        Icons.person,
+                      ),
+                      items: clients
+                          .map(
+                            (c) => DropdownMenuItem<String>(
+                              value: c['_id'],
+                              child: Text(c['name']),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedClientId = value;
+                          _selectedClient = clients.firstWhere(
+                            (c) => c['_id'] == value,
+                          );
+                          _updateClientDependentFields();
+                        });
+                      },
+                      validator: (val) =>
+                          val == null ? 'Please select a client' : null,
+                    ),
+
+                    if (clientSubCompanies.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          "Sub Companies",
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.brown,
+                          ),
                         ),
-                      )
-                      .toList(),
-                  onChanged: (v) => setState(() => _projectId = v),
-                ),
-
-                const SizedBox(height: 15),
-
-                // Client
-                DropdownButtonFormField<String>(
-                  value: _clientId,
-                  decoration: const InputDecoration(
-                    labelText: "Client",
-                    prefixIcon: Icon(Icons.person_outline),
-                  ),
-                  items: clients
-                      .map<DropdownMenuItem<String>>(
-                        (e) => DropdownMenuItem<String>(
-                          value: e['_id']?.toString(),
-                          child: Text(e['name'] ?? ''),
+                      ),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.brown.shade300),
                         ),
-                      )
-                      .toList(),
-                  onChanged: (v) => setState(() => _clientId = v),
-                ),
-
-                const SizedBox(height: 15),
-
-                // SubCompany
-                DropdownButtonFormField<String>(
-                  value: _subCompanyId,
-                  decoration: const InputDecoration(
-                    labelText: "Sub Company",
-                    prefixIcon: Icon(Icons.business),
-                  ),
-                  items: subCompanies
-                      .map<DropdownMenuItem<String>>(
-                        (e) => DropdownMenuItem<String>(
-                          value: e['_id']?.toString(),
-                          child: Text(e['name'] ?? ''),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              "Sub Companies",
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.brown,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            if (clientSubCompanies.isEmpty)
+                              const Text(
+                                "No sub companies linked",
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            ...clientSubCompanies.map(
+                              (s) => Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 4,
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.business,
+                                      color: Colors.brown,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      s,
+                                      style: const TextStyle(fontSize: 14),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      )
-                      .toList(),
-                  onChanged: (v) => setState(() => _subCompanyId = v),
+                      ),
+                    ],
+                    if (clientServices.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<String>(
+                        value: _selectedServiceId,
+                        isExpanded: true,
+                        decoration: _inputDecoration(
+                          "Choose Service",
+                          Icons.design_services,
+                        ),
+                        items: clientServices.map((service) {
+                          return DropdownMenuItem<String>(
+                            value: service['_id'],
+
+                            child: Text(
+                              service['title'],
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                              style: const TextStyle(fontSize: 14),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedServiceId = value;
+                            final selected = clientServices.firstWhere(
+                              (s) => s['_id'] == value,
+                            );
+                            serviceOfferings = selected['offerings'] ?? [];
+                          });
+                        },
+                        validator: (val) =>
+                            val == null ? 'Please choose a service' : null,
+                      ),
+
+                      if (serviceOfferings.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            "Offerings",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.brown,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.brown.shade300),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                "Offerings",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.brown,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: serviceOfferings.map((o) {
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.brown.shade50,
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: Colors.brown.shade200,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      o,
+                                      style: const TextStyle(
+                                        color: Colors.brown,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+
+                    const SizedBox(height: 16),
+                    _buildMultiTeamAssign(),
+
+                    const SizedBox(height: 16),
+                    _buildStatusDropdown(),
+                    const SizedBox(height: 16),
+                    _buildPriorityDropdown(),
+                    const SizedBox(height: 16),
+                    _buildDeadlinePicker(),
+
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryColor,
+                        minimumSize: const Size(double.infinity, 50),
+                      ),
+                      onPressed: _saveTask,
+                      icon: const Icon(Icons.check, color: Colors.white),
+                      label: Text(
+                        isEditing ? "Update Task" : "Create Task",
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ],
                 ),
-
-                const SizedBox(height: 15),
-
-                // Assigned To
-               // Assigned To
-InputDecorator(
-  decoration: const InputDecoration(
-    labelText: 'Assign To',
-    prefixIcon: Icon(Icons.group),
-  ),
-  child: Wrap(
-    spacing: 8,
-    runSpacing: 8,
-    children: teamMembers.map<Widget>((e) {
-      final id = e['_id'].toString();
-      final name = e['fullName'] ?? 'Unknown';
-      final selected = _assignedTo.contains(id);
-
-      return FilterChip(
-        label: Text(name),
-        selected: selected,
-        onSelected: (v) {
-          setState(() {
-            if (v) {
-              _assignedTo.add(id);
-            } else {
-              _assignedTo.remove(id);
-            }
-          });
-        },
-        avatar: CircleAvatar(
-          backgroundColor: selected ? Colors.white : Colors.brown.shade200,
-          child: Text(
-            name.isNotEmpty ? name[0].toUpperCase() : '?',
-            style: TextStyle(
-              color: selected ? Colors.brown : Colors.white,
-              fontWeight: FontWeight.bold,
+              ),
             ),
+    );
+  }
+
+  Widget _buildTextField(
+    TextEditingController controller,
+    String label,
+    IconData icon, {
+    int maxLines = 1,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextFormField(
+        controller: controller,
+        maxLines: maxLines,
+        decoration: _inputDecoration(label, icon),
+        validator: (val) =>
+            val == null || val.trim().isEmpty ? '$label is required' : null,
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration(String label, IconData icon) {
+    return InputDecoration(
+      prefixIcon: Icon(icon, color: Colors.brown),
+      labelText: label,
+      filled: true,
+      fillColor: Colors.white,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: AppColors.primaryColor, width: 1.5),
+      ),
+    );
+  }
+
+  Widget _buildMultiTeamAssign() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          "Assign To",
+          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.brown),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.brown.shade300),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Assign To",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.brown,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: teamMembers.map((tm) {
+                  final isSelected = _selectedTeamMembers.contains(tm['_id']);
+                  return FilterChip(
+                    label: Text(tm['fullName']),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      setState(() {
+                        if (selected) {
+                          _selectedTeamMembers.add(tm['_id']);
+                        } else {
+                          _selectedTeamMembers.remove(tm['_id']);
+                        }
+                      });
+                    },
+                    selectedColor: AppColors.primaryColor.withOpacity(0.2),
+                    checkmarkColor: AppColors.primaryColor,
+                  );
+                }).toList(),
+              ),
+            ],
           ),
         ),
-        selectedColor: AppColors.primaryColor,
-        labelStyle: TextStyle(
-          color: selected ? Colors.white : Colors.black,
-        ),
-      );
-    }).toList(),
-  ),
-),
+      ],
+    );
+  }
 
+  Widget _buildStatusDropdown() {
+    final statuses = ['open', 'in_progress', 'review', 'done', 'blocked'];
+    return DropdownButtonFormField<String>(
+      value: _selectedStatus,
+      decoration: _inputDecoration("Status", Icons.flag),
+      items: statuses
+          .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+          .toList(),
+      onChanged: (v) => setState(() => _selectedStatus = v),
+      validator: (val) => val == null ? 'Please select status' : null,
+    );
+  }
 
-                const SizedBox(height: 15),
+  Widget _buildPriorityDropdown() {
+    final priorities = ['low', 'medium', 'high'];
+    return DropdownButtonFormField<String>(
+      value: _selectedPriority,
+      decoration: _inputDecoration("Priority", Icons.priority_high),
+      items: priorities
+          .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+          .toList(),
+      onChanged: (v) => setState(() => _selectedPriority = v),
+      validator: (val) => val == null ? 'Please select priority' : null,
+    );
+  }
 
-                // Status
-                DropdownButtonFormField<String>(
-                  value: _status,
-                  decoration: const InputDecoration(
-                    labelText: "Status",
-                    prefixIcon: Icon(Icons.flag),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: "open", child: Text("Open")),
-                    DropdownMenuItem(
-                      value: "in_progress",
-                      child: Text("In Progress"),
-                    ),
-                    DropdownMenuItem(value: "review", child: Text("Review")),
-                    DropdownMenuItem(value: "done", child: Text("Done")),
-                    DropdownMenuItem(value: "blocked", child: Text("Blocked")),
-                  ],
-                  onChanged: (val) => setState(() => _status = val!),
-                ),
-                const SizedBox(height: 15),
-
-                // Priority
-                DropdownButtonFormField<String>(
-                  value: _priority,
-                  decoration: const InputDecoration(
-                    labelText: "Priority",
-                    prefixIcon: Icon(Icons.low_priority),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: "low", child: Text("Low")),
-                    DropdownMenuItem(value: "medium", child: Text("Medium")),
-                    DropdownMenuItem(value: "high", child: Text("High")),
-                  ],
-                  onChanged: (val) => setState(() => _priority = val!),
-                ),
-                const SizedBox(height: 15),
-
-                // Deadline Picker
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.calendar_month),
-                  title: Text(
-                    _deadline == null
-                        ? "Select Deadline"
-                        : _deadline!.toLocal().toString().split(' ')[0],
-                  ),
-                  trailing: const Icon(Icons.edit_calendar),
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: _deadline ?? DateTime.now(),
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2100),
-                    );
-                    if (picked != null) setState(() => _deadline = picked);
-                  },
-                ),
-
-                const SizedBox(height: 25),
-                ElevatedButton.icon(
-                  onPressed: saveTask,
-                  icon: const Icon(Icons.check, color: Colors.white),
-                  label: Text(
-                    widget.task == null ? "Create Task" : "Update Task",
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primaryColor,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 40,
-                      vertical: 14,
-                    ),
-                  ),
-                ),
-              ],
+  Widget _buildDeadlinePicker() {
+    return InkWell(
+      onTap: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: _deadline ?? DateTime.now(),
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2100),
+        );
+        if (picked != null) setState(() => _deadline = picked);
+      },
+      child: InputDecorator(
+        decoration: _inputDecoration("Deadline", Icons.calendar_today),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              _deadline == null
+                  ? "Select Date"
+                  : _deadline!.toLocal().toString().split(' ')[0],
             ),
-          ),
+            const Icon(Icons.calendar_today, color: Colors.brown),
+          ],
         ),
       ),
     );

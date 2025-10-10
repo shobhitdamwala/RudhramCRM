@@ -4,13 +4,8 @@ const MeetingSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
     agenda: String,
-
-    project: { type: mongoose.Schema.Types.ObjectId, ref: "Project" },
-
    
     subCompany: { type: mongoose.Schema.Types.ObjectId, ref: "SubCompany" },
-
-  
     organizer: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 
     participants: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],

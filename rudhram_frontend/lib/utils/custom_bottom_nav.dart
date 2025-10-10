@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import '../utils/constants.dart';
+import '../screens/home_screen.dart';
+import '../screens/task_screen.dart';
 import '../screens/quick_action_screen.dart';
+
+import '../screens/team_member_screen.dart';
 
 class CustomBottomNavBar extends StatelessWidget {
   final int currentIndex;
@@ -17,6 +21,7 @@ class CustomBottomNavBar extends StatelessWidget {
     final List<IconData> icons = [
       Icons.home_outlined,
       Icons.task_alt_outlined,
+      Icons.bolt_outlined,
       Icons.grid_view_rounded,
       Icons.groups_2_outlined,
     ];
@@ -26,26 +31,29 @@ class CustomBottomNavBar extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _buildSquareIcon(icons[0], 0),
-          _buildSquareIcon(icons[1], 1),
-          _buildCenterCircleIcon(context, Icons.bolt_outlined),
-          _buildSquareIcon(icons[2], 2),
-          _buildSquareIcon(icons[3], 3),
+          _buildSquareIcon(context, icons[0], 0),
+          _buildSquareIcon(context, icons[1], 1),
+          _buildCenterCircleIcon(context, icons[2]),
+          _buildSquareIcon(context, icons[3], 3),
+          _buildSquareIcon(context, icons[4], 4),
         ],
       ),
     );
   }
 
-  Widget _buildSquareIcon(IconData icon, int index) {
+  Widget _buildSquareIcon(BuildContext context, IconData icon, int index) {
     final isActive = currentIndex == index;
     return GestureDetector(
-      onTap: () => onTap(index),
+      onTap: () {
+        onTap(index);
+        _navigateToScreen(context, index);
+      },
       child: Container(
         width: 50,
         height: 50,
         decoration: BoxDecoration(
           color: isActive
-              ? AppColors.primaryColor.withOpacity(0.1)
+              ? const Color.fromARGB(255, 0, 0, 0)
               : const Color(0xFFF5E6D3),
           borderRadius: BorderRadius.circular(14),
         ),
@@ -75,6 +83,32 @@ class CustomBottomNavBar extends StatelessWidget {
         ),
         child: Icon(icon, color: AppColors.primaryColor, size: 38),
       ),
+    );
+  }
+
+  void _navigateToScreen(BuildContext context, int index) {
+    Widget page;
+
+    switch (index) {
+      case 0:
+        page = const HomeScreen();
+        break;
+      case 1:
+        page = const TaskScreen();
+        break;
+      case 3:
+        page = const QuickActionScreen();
+        break;
+      case 4:
+        page = const TeamMemberScreen();
+        break;
+      default:
+        return;
+    }
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => page),
     );
   }
 }

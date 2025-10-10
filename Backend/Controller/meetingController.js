@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import Meeting from "../Models/Meeting.js";
 import Lead from "../Models/Lead.js";
 import Client from "../Models/Client.js";
-import Project from "../Models/Project.js";
+
 
 
 export const addMeeting = async (req, res) => {
@@ -10,7 +10,6 @@ export const addMeeting = async (req, res) => {
     const {
       title,
       agenda,
-      project,
       subCompany,
       organizer,
       participants,
@@ -45,15 +44,9 @@ export const addMeeting = async (req, res) => {
       if (!clientExists)
         return res.status(404).json({ success: false, message: "Client not found" });
     }
-
-    if (project && !mongoose.Types.ObjectId.isValid(project)) {
-      return res.status(400).json({ success: false, message: "Invalid project ID" });
-    }
-
     const meeting = await Meeting.create({
       title,
       agenda,
-      project,
       subCompany,
       organizer: organizer || req.user?._id,
       participants,
@@ -151,13 +144,12 @@ export const deleteMeeting = async (req, res) => {
 
 export const getAllMeetings = async (req, res) => {
   try {
-    const { meetingWithType, lead, client, project, subCompany } = req.query;
+    const { meetingWithType, lead, client, subCompany } = req.query;
     const filter = {};
 
     if (meetingWithType) filter.meetingWithType = meetingWithType;
     if (lead) filter.lead = lead;
     if (client) filter.client = client;
-    if (project) filter.project = project;
     if (subCompany) filter.subCompany = subCompany;
 
     const meetings = await Meeting.find(filter)
@@ -165,7 +157,6 @@ export const getAllMeetings = async (req, res) => {
       .populate("client", "name email phone")
       .populate("organizer", "fullName email")
       .populate("participants", "fullName email")
-      .populate("project", "title")
       .sort({ startTime: 1 });
 
     res.status(200).json({
@@ -192,7 +183,6 @@ export const getMeetingById = async (req, res) => {
       .populate("client", "name email phone")
       .populate("organizer", "fullName email")
       .populate("participants", "fullName email")
-      .populate("project", "title");
 
     if (!meeting)
       return res.status(404).json({ success: false, message: "Meeting not found" });

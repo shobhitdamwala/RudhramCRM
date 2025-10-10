@@ -7,6 +7,11 @@ import '../utils/api_config.dart';
 import '../utils/constants.dart';
 import '../widgets/background_container.dart';
 import '../screens/team_member_screen.dart';
+import '../utils/api_config.dart';
+import '../utils/snackbar_helper.dart';
+import '../widgets/profile_header.dart';
+import '../screens/task_screen.dart';
+import '../screens/meeting_screen.dart';
 
 class QuickActionScreen extends StatefulWidget {
   const QuickActionScreen({super.key});
@@ -22,44 +27,75 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
   @override
   void initState() {
     super.initState();
-    fetchUser();
+    _loadUserData();
   }
 
-  Future<void> fetchUser() async {
+  Future<void> _loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token != null) {
+      await fetchUser(token);
+    }
+  }
+
+  Future<void> fetchUser(String token) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString("auth_token");
-
-      if (token == null) return;
-
-      final response = await http.get(
+      final res = await http.get(
         Uri.parse("${ApiConfig.baseUrl}/user/me"),
-        headers: {
-          "Authorization": "Bearer $token",
-          "Content-Type": "application/json",
-        },
+        headers: {"Authorization": "Bearer $token"},
       );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final user = data['user'];
-
-        if (user['avatarUrl'] != null &&
-            user['avatarUrl'].toString().startsWith('/')) {
-          user['avatarUrl'] = "${ApiConfig.baseUrl}${user['avatarUrl']}";
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final u = Map<String, dynamic>.from(data['user'] ?? {});
+        if (u['avatarUrl'] != null &&
+            u['avatarUrl'].toString().startsWith('/')) {
+          u['avatarUrl'] = _absUrl(u['avatarUrl']);
         }
-
-        setState(() {
-          userData = user;
-          isLoading = false;
-        });
+        if (mounted) setState(() => userData = u);
       } else {
-        print("⚠️ Failed to fetch user: ${response.body}");
-        setState(() => isLoading = false);
+        await _showErrorSnack(res.body, fallback: "Failed to fetch user");
       }
     } catch (e) {
-      print("❌ Fetch error: $e");
-      setState(() => isLoading = false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("User load error: $e"),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  String _absUrl(String? maybeRelative) {
+    if (maybeRelative == null || maybeRelative.isEmpty) return '';
+    if (maybeRelative.startsWith('http')) return maybeRelative;
+
+    if (maybeRelative.startsWith('/uploads')) {
+      // 🟢 Use image base URL
+      return "${ApiConfig.imageBaseUrl}$maybeRelative";
+    }
+
+    // Default
+    return "${ApiConfig.baseUrl}$maybeRelative";
+  }
+
+  Future<void> _showErrorSnack(
+    dynamic body, {
+    String fallback = "Request failed",
+  }) async {
+    try {
+      final b = body is String ? jsonDecode(body) : body;
+      final msg = (b?['message'] ?? b?['error'] ?? b?['msg'] ?? fallback)
+          .toString();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(fallback), backgroundColor: Colors.red),
+      );
     }
   }
 
@@ -78,133 +114,105 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
 
               return Column(
                 children: [
-                  /// 🔹 Header Section
-                  Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 26,
-                              backgroundImage: userData?['avatarUrl'] != null
-                                  ? NetworkImage(userData!['avatarUrl'])
-                                  : const AssetImage('assets/user.jpg')
-                                      as ImageProvider,
-                            ),
-                            const SizedBox(width: 10),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  userData != null
-                                      ? "Hi ${userData!['fullName'] ?? ''}"
-                                      : "Hi...",
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.brown,
-                                  ),
-                                ),
-                                Text(
-                                  userData?['role'] ?? "Super Admin",
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        Row(
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.arrow_back_ios_new,
-                                  color: Colors.brown, size: 22),
-                              onPressed: () => Navigator.pop(context),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.notifications_none,
-                                  color: Colors.brown, size: 26),
-                              onPressed: () {},
-                            ),
-                          ],
-                        )
-                      ],
-                    ),
+                  ProfileHeader(
+                    avatarUrl: userData?['avatarUrl'],
+                    fullName: userData?['fullName'],
+                    role: userData?['role'] ?? "Super Admin",
+                    showBackButton: true,
+                    onBack: () => Navigator.pop(context),
+                    onNotification: () {
+                      print("🔔 Notification tapped");
+                    },
                   ),
-
                   const SizedBox(height: 10),
 
-                  /// 🔹 Quick Action Buttons (responsive grid)
+                  // Quick Actions Grid ↓
                   Flexible(
                     fit: FlexFit.tight,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 25),
-                      child:GridView.builder(
-  shrinkWrap: true,
-  physics: const NeverScrollableScrollPhysics(),
-  itemCount: _actions.length,
-  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-    crossAxisCount: 3,
-    mainAxisSpacing: 20,
-    crossAxisSpacing: 20,
-  ),
-  itemBuilder: (context, index) {
-    final action = _actions[index];
-
-    return GestureDetector(
-      onTap: () {
-        if (action['label'] == "Team Member") {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const TeamMemberScreen(),
-            ),
-          );
-        } else {
-          // Handle other quick actions here
-          print("Tapped on ${action['label']}");
-        }
-      },
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(action['icon'], size: 28, color: Colors.brown),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            action['label'],
-            style: const TextStyle(fontSize: 12, color: Colors.brown),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  },
-)
+                      child: GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _actions.length,
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 3,
+                              mainAxisSpacing: 20,
+                              crossAxisSpacing: 20,
+                            ),
+                        itemBuilder: (context, index) {
+                          final action = _actions[index];
+                          return GestureDetector(
+                            onTap: () {
+                              if (action['label'] == "Team Member") {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const TeamMemberScreen(),
+                                  ),
+                                );
+                              } else if (action['label'] == "New Task") {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const TaskScreen(), // 👈 navigate here
+                                  ),
+                                );
+                              } else if (action['label'] == "New Meeting") {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const MeetingScreen(), // 👈 navigate here
+                                  ),
+                                );
+                              } else {
+                                print("Tapped on ${action['label']}");
+                              }
+                            },
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    action['icon'],
+                                    size: 28,
+                                    color: Colors.brown,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  action['label'],
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.brown,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ),
 
                   const SizedBox(height: 10),
 
-                  /// 🔹 Bottom Navigation
                   CustomBottomNavBar(
-                  currentIndex: 0, // you can set the active tab index
-                  onTap: (index) {
-                    // Handle navigation here
-                    print("Tapped on $index");
-                  },
-                ),
+                    currentIndex: 2,
+                    onTap: (index) {
+                      print("Tapped on $index");
+                    },
+                  ),
                 ],
               );
             },
@@ -216,7 +224,11 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
 
   /// 🔸 Reusable Quick Action Icon Card (Responsive)
   Widget _buildAction(
-      IconData icon, String title, double circleSize, double iconSize) {
+    IconData icon,
+    String title,
+    double circleSize,
+    double iconSize,
+  ) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -251,7 +263,7 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
   }
 
   /// 🔸 Bottom Navbar (same as Home)
-  
+
   final List<Map<String, dynamic>> _actions = [
     {'icon': Icons.calendar_month_outlined, 'label': "New Meeting"},
     {'icon': Icons.task_alt_outlined, 'label': "New Task"},
@@ -261,6 +273,5 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
     {'icon': Icons.cloud_upload_outlined, 'label': "Drive"},
     {'icon': Icons.notifications_active_outlined, 'label': "Notify"},
     {'icon': Icons.group_add_outlined, 'label': "Team Member"},
-
   ];
 }

@@ -9,6 +9,10 @@ import '../widgets/background_container.dart';
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
 import '../utils/api_config.dart';
 import '../utils/custom_bottom_nav.dart';
+import '../utils/api_config.dart';
+import '../utils/snackbar_helper.dart';
+import '../widgets/profile_header.dart';
+import 'package:rudhram_frontend/screens/sub_company_info_screen.dart'; // 👈 Add this import at the top
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -63,32 +67,62 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> fetchUser(String token) async {
     try {
-      final cleanToken = token.startsWith('Bearer ')
-          ? token.split('Bearer ').last
-          : token;
-
-      final response = await http.get(
+      final res = await http.get(
         Uri.parse("${ApiConfig.baseUrl}/user/me"),
-        headers: {"Authorization": "Bearer $cleanToken"},
+        headers: {"Authorization": "Bearer $token"},
       );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final user = data['user'];
-
-        // Fix relative avatar URL
-        if (user['avatarUrl'] != null &&
-            user['avatarUrl'].toString().startsWith('/')) {
-          user['avatarUrl'] = "${ApiConfig.baseUrl}${user['avatarUrl']}";
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final u = Map<String, dynamic>.from(data['user'] ?? {});
+        if (u['avatarUrl'] != null &&
+            u['avatarUrl'].toString().startsWith('/')) {
+          u['avatarUrl'] = _absUrl(u['avatarUrl']);
         }
-
-        setState(() => userData = user);
-        print("✅ User fetched: ${userData!['fullName']}");
+        if (mounted) setState(() => userData = u);
       } else {
-        print("❌ User fetch failed: ${response.body}");
+        await _showErrorSnack(res.body, fallback: "Failed to fetch user");
       }
     } catch (e) {
-      print("❌ User fetch error: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("User load error: $e"),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  String _absUrl(String? maybeRelative) {
+    if (maybeRelative == null || maybeRelative.isEmpty) return '';
+    if (maybeRelative.startsWith('http')) return maybeRelative;
+
+    if (maybeRelative.startsWith('/uploads')) {
+      // 🟢 Use image base URL
+      return "${ApiConfig.imageBaseUrl}$maybeRelative";
+    }
+
+    // Default
+    return "${ApiConfig.baseUrl}$maybeRelative";
+  }
+
+  Future<void> _showErrorSnack(
+    dynamic body, {
+    String fallback = "Request failed",
+  }) async {
+    try {
+      final b = body is String ? jsonDecode(body) : body;
+      final msg = (b?['message'] ?? b?['error'] ?? b?['msg'] ?? fallback)
+          .toString();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(fallback), backgroundColor: Colors.red),
+      );
     }
   }
 
@@ -139,56 +173,16 @@ class _HomeScreenState extends State<HomeScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             /// 🔹 User Header
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 28,
-                                      backgroundImage:
-                                          userData?['avatarUrl'] != null
-                                          ? NetworkImage(userData!['avatarUrl'])
-                                          : const AssetImage('assets/user.jpg')
-                                                as ImageProvider,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          userData != null
-                                              ? 'Hi ${userData!['fullName'] ?? ''}'
-                                              : 'Hi...',
-                                          style: const TextStyle(
-                                            fontSize: 18,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.brown,
-                                          ),
-                                        ),
-
-                                        Text(
-                                          userData?['role'] ?? '',
-                                          style: const TextStyle(
-                                            fontSize: 13,
-                                            color: Colors.grey,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                                IconButton(
-                                  onPressed: () {},
-                                  icon: const Icon(
-                                    Icons.notifications_none,
-                                    color: Colors.brown,
-                                    size: 30,
-                                  ),
-                                ),
-                              ],
+                            ProfileHeader(
+                              avatarUrl: userData?['avatarUrl'],
+                              fullName: userData?['fullName'],
+                              role: userData?['role'] ?? '',
+                              onNotification: () {
+                                // handle notification icon tap
+                                print("🔔 Notification tapped");
+                              },
                             ),
+
                             const SizedBox(height: 15),
 
                             /// 🔹 Meeting Card (Static)
@@ -250,11 +244,25 @@ class _HomeScreenState extends State<HomeScreen> {
                                       spacing: 10,
                                       runSpacing: 10,
                                       alignment: WrapAlignment.center,
-                                      children: List.generate(
-                                        subCompanies.length,
-                                        (index) {
-                                          final sub = subCompanies[index];
-                                          return SizedBox(
+                                      children: List.generate(subCompanies.length, (
+                                        index,
+                                      ) {
+                                        final sub = subCompanies[index];
+                                        return GestureDetector(
+                                          onTap: () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    SubCompanyInfoScreen(
+                                                      subCompanyId:
+                                                          sub['_id'], // ✅ Pass the ID here
+                                                    ),
+                                              ),
+                                            );
+                                          },
+
+                                          child: SizedBox(
                                             width: itemWidth,
                                             child: Column(
                                               children: [
@@ -315,9 +323,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 ),
                                               ],
                                             ),
-                                          );
-                                        },
-                                      ),
+                                          ),
+                                        );
+                                      }),
                                     ),
                                   );
                                 },
@@ -379,13 +387,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
 
-                     CustomBottomNavBar(
-                  currentIndex: 0, // you can set the active tab index
-                  onTap: (index) {
-                    // Handle navigation here
-                    print("Tapped on $index");
-                  },
-                ),
+                    CustomBottomNavBar(
+                      currentIndex: 0, // you can set the active tab index
+                      onTap: (index) {
+                        // Handle navigation here
+                        print("Tapped on $index");
+                      },
+                    ),
                   ],
                 ),
         ),

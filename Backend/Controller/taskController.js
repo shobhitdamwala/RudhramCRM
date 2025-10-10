@@ -1,6 +1,5 @@
 import mongoose from "mongoose";
 import Task from "../Models/Task.js";
-import Project from "../Models/Project.js";
 import Client from "../Models/Client.js";
 import SubCompany from "../Models/SubCompany.js";
 import User from "../Models/userSchema.js";
@@ -10,7 +9,6 @@ export const addTask = async (req, res) => {
     const {
       title,
       description,
-      project,
       client,
       subCompany,
       assignedTo,
@@ -31,7 +29,7 @@ export const addTask = async (req, res) => {
         throw new Error(`Invalid ${name} ID`);
       }
     };
-    validateId(project, "project");
+
     validateId(client, "client");
     validateId(subCompany, "subCompany");
 
@@ -56,7 +54,6 @@ export const addTask = async (req, res) => {
     const task = await Task.create({
       title,
       description,
-      project,
       client,
       subCompany,
       createdBy: req.user?._id || null,
@@ -168,19 +165,17 @@ export const deleteTask = async (req, res) => {
 
 export const getAllTasks = async (req, res) => {
   try {
-    const { status, priority, assignedTo, project, client, subCompany, search } = req.query;
+    const { status, priority, assignedTo,  client, subCompany, search } = req.query;
     const filter = {};
 
     if (status) filter.status = status;
     if (priority) filter.priority = priority;
-    if (project) filter.project = project;
     if (client) filter.client = client;
     if (subCompany) filter.subCompany = subCompany;
     if (assignedTo) filter.assignedTo = assignedTo;
     if (search) filter.title = { $regex: search, $options: "i" };
 
     const tasks = await Task.find(filter)
-      .populate("project", "title")
       .populate("client", "name")
       .populate("subCompany", "name")
       .populate("assignedTo", "fullName email")
@@ -205,7 +200,6 @@ export const getTaskById = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid task ID" });
 
     const task = await Task.findById(id)
-      .populate("project", "title")
       .populate("client", "name")
       .populate("subCompany", "name")
       .populate("assignedTo", "fullName email")

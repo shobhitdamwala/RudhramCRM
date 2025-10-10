@@ -1,5 +1,6 @@
 import Client from "../Models/Client.js";
 import Lead from "../Models/Lead.js";
+import SubCompany from "../Models/SubCompany.js";
 
 export const addLead = async (req, res) => {
   try {
@@ -133,14 +134,13 @@ export const deleteLead = async (req, res) => {
     });
   }
 };
-
 export const convertLeadToClient = async (req, res) => {
   try {
     const { leadId } = req.params;
-    const userId = req.user?._id; // assuming authentication middleware adds user
+    const userId = req.user?._id;
 
     // 1️⃣ Find the lead
-    const lead = await Lead.findById(leadId);
+    const lead = await Lead.findById(leadId).populate('subCompanyIds', 'name');
     if (!lead) {
       return res.status(404).json({ success: false, message: "Lead not found" });
     }
@@ -153,24 +153,31 @@ export const convertLeadToClient = async (req, res) => {
         message: "Lead has already been converted to a client.",
       });
     }
-    // 3️⃣ Create new client using lead data
+
+    // 3️⃣ Prepare meta data
+    const subCompanyNames = lead.subCompanyIds.map(sub => sub.name);
+    const metaData = {
+      source: lead.source,
+      businessCategory: lead.businessCategory,
+      chosenServices: lead.chosenServices,
+      subCompanyIds: lead.subCompanyIds.map(sub => sub._id),
+      subCompanyNames: subCompanyNames,
+    };
+
+    // 4️⃣ Create new client using lead data
     const newClient = new Client({
       leadId: lead._id,
       name: lead.name,
       email: lead.email,
       phone: lead.phone,
       businessName: lead.businessName,
-      meta: {
-        source: lead.source,
-        businessCategory: lead.businessCategory,
-        chosenServices: lead.chosenServices,
-      },
+      meta: metaData,
       createdBy: userId,
     });
 
     await newClient.save();
 
-    // 4️⃣ Update lead status to "converted"
+    // 5️⃣ Update lead status to "converted"
     lead.status = "converted";
     await lead.save();
 

@@ -4,6 +4,7 @@ import 'package:rudhram_frontend/screens/team_member_screen.dart';
 import 'screens/splash_screen.dart';
 import 'utils/constants.dart';
 import 'screens/task_screen.dart';
+import 'screens/meeting_screen.dart';
 
 void main() {
   runApp(const RudhramApp());
@@ -22,7 +23,7 @@ class RudhramApp extends StatelessWidget {
         scaffoldBackgroundColor: AppColors.backgroundGradientStart,
         fontFamily: 'Poppins',
       ),
-      home: const SplashScreen(),
+      home: const MeetingScreen(),
     );
   }
 }

@@ -9,6 +9,8 @@ import '../utils/constants.dart';
 import '../widgets/background_container.dart';
 import '../utils/api_config.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/profile_header.dart';
+
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
 
 class TeamMemberScreen extends StatefulWidget {
@@ -324,7 +326,14 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildHeader(),
+                    ProfileHeader(
+                      avatarUrl: userData?['avatarUrl'],
+                      fullName: userData?['fullName'],
+                      role: userData?['role'],
+                      showBackButton: true,
+                      onBack: () => Navigator.pop(context),
+                    ),
+
                     const SizedBox(height: 10),
                     Expanded(
                       child: showAll
@@ -335,7 +344,7 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
                     const SizedBox(height: 20),
                     _buildAddMemberButton(),
                     const SizedBox(height: 25),
-                    CustomBottomNavBar(currentIndex: 1, onTap: (i) {}),
+                    CustomBottomNavBar(currentIndex: 4, onTap: (i) {}),
                   ],
                 ),
         ),

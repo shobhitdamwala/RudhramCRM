@@ -4,8 +4,6 @@ const TaskSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
     description: String,
-
-    project: { type: mongoose.Schema.Types.ObjectId, ref: "Project" },
     client: { type: mongoose.Schema.Types.ObjectId, ref: "Client" },
     subCompany: { type: mongoose.Schema.Types.ObjectId, ref: "SubCompany" },
 

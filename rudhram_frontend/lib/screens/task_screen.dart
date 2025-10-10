@@ -9,6 +9,9 @@ import '../utils/snackbar_helper.dart';
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
 import '../utils/custom_bottom_nav.dart';
 import 'add_edit_task.dart';
+import '../screens/task_details_screen.dart';
+import '../utils/snackbar_helper.dart';
+import '../widgets/profile_header.dart';
 
 class TaskScreen extends StatefulWidget {
   const TaskScreen({Key? key}) : super(key: key);
@@ -20,12 +23,22 @@ class TaskScreen extends StatefulWidget {
 class _TaskScreenState extends State<TaskScreen> {
   List<dynamic> tasks = [];
   bool isLoading = true;
-  int _selectedIndex = 0;
+  int _selectedIndex = 1;
+  Map<String, dynamic>? userData;
 
   @override
   void initState() {
     super.initState();
     fetchTasks();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token != null) {
+      await fetchUser(token);
+    }
   }
 
   String _cleanToken(String? token) {
@@ -68,6 +81,67 @@ class _TaskScreenState extends State<TaskScreen> {
       );
     } finally {
       setState(() => isLoading = false);
+    }
+  }
+
+  Future<void> fetchUser(String token) async {
+    try {
+      final res = await http.get(
+        Uri.parse("${ApiConfig.baseUrl}/user/me"),
+        headers: {"Authorization": "Bearer $token"},
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final u = Map<String, dynamic>.from(data['user'] ?? {});
+        if (u['avatarUrl'] != null &&
+            u['avatarUrl'].toString().startsWith('/')) {
+          u['avatarUrl'] = _absUrl(u['avatarUrl']);
+        }
+        if (mounted) setState(() => userData = u);
+      } else {
+        await _showErrorSnack(res.body, fallback: "Failed to fetch user");
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("User load error: $e"),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  String _absUrl(String? maybeRelative) {
+    if (maybeRelative == null || maybeRelative.isEmpty) return '';
+    if (maybeRelative.startsWith('http')) return maybeRelative;
+
+    if (maybeRelative.startsWith('/uploads')) {
+      // 🟢 Use image base URL
+      return "${ApiConfig.imageBaseUrl}$maybeRelative";
+    }
+
+    // Default
+    return "${ApiConfig.baseUrl}$maybeRelative";
+  }
+
+  Future<void> _showErrorSnack(
+    dynamic body, {
+    String fallback = "Request failed",
+  }) async {
+    try {
+      final b = body is String ? jsonDecode(body) : body;
+      final msg = (b?['message'] ?? b?['error'] ?? b?['msg'] ?? fallback)
+          .toString();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(fallback), backgroundColor: Colors.red),
+      );
     }
   }
 
@@ -142,11 +216,21 @@ class _TaskScreenState extends State<TaskScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBody: true,
       body: BackgroundContainer(
         child: SafeArea(
           child: Column(
             children: [
-              _buildHeader(),
+              ProfileHeader(
+                avatarUrl: userData?['avatarUrl'],
+                fullName: userData?['fullName'],
+                role: userData?['role'] ?? "Super Admin",
+                showBackButton: true,
+                onBack: () => Navigator.pop(context),
+                onNotification: () {
+                  print("🔔 Notification tapped");
+                },
+              ),
               Expanded(
                 child: isLoading
                     ? const Center(
@@ -179,26 +263,35 @@ class _TaskScreenState extends State<TaskScreen> {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: AppColors.primaryColor,
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text("New Task", style: TextStyle(color: Colors.white)),
-        onPressed: () async {
-          final created = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const AddEditTaskScreen()),
-          );
-          if (created == true) fetchTasks();
-        },
+      floatingActionButton: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 80.0),
+          child: FloatingActionButton.extended(
+            backgroundColor: AppColors.primaryColor,
+            icon: const Icon(Icons.add, color: Colors.white),
+            label: const Text(
+              "New Task",
+              style: TextStyle(color: Colors.white),
+            ),
+            onPressed: () async {
+              final created = await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AddEditTaskScreen()),
+              );
+              if (created == true) fetchTasks();
+            },
+          ),
+        ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-      bottomNavigationBar: CustomBottomNavBar(
-        currentIndex: _selectedIndex,
-        onTap: (index) {
-          setState(() => _selectedIndex = index);
-          // Handle navigation here
-          print("Tapped on $index");
-        },
+
+      bottomNavigationBar: SafeArea(
+        child: CustomBottomNavBar(
+          currentIndex: _selectedIndex,
+          onTap: (index) {
+            setState(() => _selectedIndex = index);
+          },
+        ),
       ),
     );
   }
@@ -237,7 +330,7 @@ class _TaskScreenState extends State<TaskScreen> {
             color: Colors.black.withOpacity(0.08),
             blurRadius: 6,
             offset: const Offset(0, 4),
-          )
+          ),
         ],
       ),
       child: ListTile(
@@ -253,7 +346,8 @@ class _TaskScreenState extends State<TaskScreen> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (task['description'] != null && task['description'].toString().isNotEmpty)
+            if (task['description'] != null &&
+                task['description'].toString().isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 4.0),
                 child: Text(
@@ -264,33 +358,45 @@ class _TaskScreenState extends State<TaskScreen> {
                 ),
               ),
             const SizedBox(height: 8),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 Chip(
                   label: Text(task['status'] ?? ''),
                   backgroundColor: _statusColor(task['status'] ?? ''),
                   labelStyle: const TextStyle(color: Colors.white),
                 ),
-                const SizedBox(width: 8),
                 Chip(
                   label: Text(task['priority'] ?? ''),
                   backgroundColor: _priorityColor(task['priority'] ?? ''),
                   labelStyle: const TextStyle(color: Colors.white),
                 ),
-                const Spacer(),
                 if (task['deadline'] != null)
                   Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.calendar_today, size: 14, color: Colors.brown),
+                      const Icon(
+                        Icons.calendar_today,
+                        size: 14,
+                        color: Colors.brown,
+                      ),
                       const SizedBox(width: 4),
                       Text(
-                        DateTime.parse(task['deadline']).toLocal().toString().split(' ')[0],
-                        style: const TextStyle(fontSize: 12, color: Colors.brown),
+                        DateTime.parse(
+                          task['deadline'],
+                        ).toLocal().toString().split(' ')[0],
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.brown,
+                        ),
                       ),
                     ],
                   ),
               ],
             ),
+
             if (task['project'] != null)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
@@ -299,9 +405,9 @@ class _TaskScreenState extends State<TaskScreen> {
                   style: const TextStyle(fontSize: 12),
                 ),
               ),
-            if (task['client'] != null)
+            if (task['client'] != null && task['client'] is Map)
               Text(
-                "👤 Client: ${task['client']['name'] ?? ''}",
+                "👤 Client: ${(task['client'] as Map)['name'] ?? ''}",
                 style: const TextStyle(fontSize: 12),
               ),
           ],
@@ -318,23 +424,97 @@ class _TaskScreenState extends State<TaskScreen> {
               if (updated == true) fetchTasks();
             } else if (value == 'delete') {
               deleteTask(task['_id']);
+            } else if (value == 'details') {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => TaskDetailsScreen(task: task),
+                ),
+              );
             }
           },
           itemBuilder: (context) => [
             const PopupMenuItem(
+              value: 'details',
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 18),
+                  SizedBox(width: 8),
+                  Text('Details'),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
               value: 'edit',
               child: Row(
-                children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Edit')],
+                children: [
+                  Icon(Icons.edit, size: 18),
+                  SizedBox(width: 8),
+                  Text('Edit'),
+                ],
               ),
             ),
             const PopupMenuItem(
               value: 'delete',
               child: Row(
-                children: [Icon(Icons.delete, size: 18, color: Colors.red), SizedBox(width: 8), Text('Delete')],
+                children: [
+                  Icon(Icons.delete, size: 18, color: Colors.red),
+                  SizedBox(width: 8),
+                  Text('Delete'),
+                ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildProfileHeader() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 28,
+                backgroundImage: userData?['avatarUrl'] != null
+                    ? NetworkImage(userData!['avatarUrl'])
+                    : const AssetImage('assets/user.jpg') as ImageProvider,
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    userData != null
+                        ? 'Hi ${userData!['fullName'] ?? ''}'
+                        : 'Hi...',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.brown,
+                    ),
+                  ),
+                  Text(
+                    userData?['role'] ?? '',
+                    style: const TextStyle(fontSize: 13, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          IconButton(
+            onPressed: () {},
+            icon: const Icon(
+              Icons.notifications_none,
+              color: Colors.brown,
+              size: 30,
+            ),
+          ),
+        ],
       ),
     );
   }
