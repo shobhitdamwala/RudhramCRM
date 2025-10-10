@@ -1,0 +1,341 @@
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/constants.dart';
+import '../utils/api_config.dart';
+import '../widgets/background_container.dart';
+import '../utils/snackbar_helper.dart';
+import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
+import '../utils/custom_bottom_nav.dart';
+import 'add_edit_task.dart';
+
+class TaskScreen extends StatefulWidget {
+  const TaskScreen({Key? key}) : super(key: key);
+
+  @override
+  State<TaskScreen> createState() => _TaskScreenState();
+}
+
+class _TaskScreenState extends State<TaskScreen> {
+  List<dynamic> tasks = [];
+  bool isLoading = true;
+  int _selectedIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchTasks();
+  }
+
+  String _cleanToken(String? token) {
+    if (token == null) return '';
+    return token.startsWith('Bearer ')
+        ? token.substring('Bearer '.length).trim()
+        : token.trim();
+  }
+
+  Future<void> fetchTasks() async {
+    setState(() => isLoading = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = _cleanToken(prefs.getString('auth_token'));
+
+      final res = await http.get(
+        Uri.parse("${ApiConfig.baseUrl}/task/gettask"),
+        headers: {"Authorization": "Bearer $token"},
+      );
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        setState(() {
+          tasks = data['data'] ?? [];
+        });
+      } else {
+        SnackbarHelper.show(
+          context,
+          title: 'Error',
+          message: 'Failed to fetch tasks',
+          type: ContentType.failure,
+        );
+      }
+    } catch (e) {
+      SnackbarHelper.show(
+        context,
+        title: 'Error',
+        message: 'Task load error: $e',
+        type: ContentType.failure,
+      );
+    } finally {
+      setState(() => isLoading = false);
+    }
+  }
+
+  Future<void> deleteTask(String id) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = _cleanToken(prefs.getString('auth_token'));
+
+      final res = await http.delete(
+        Uri.parse("${ApiConfig.baseUrl}/task/$id"),
+        headers: {"Authorization": "Bearer $token"},
+      );
+
+      if (res.statusCode == 200) {
+        setState(() {
+          tasks.removeWhere((t) => t['_id'] == id);
+        });
+        SnackbarHelper.show(
+          context,
+          title: 'Deleted',
+          message: 'Task deleted successfully',
+          type: ContentType.success,
+        );
+      } else {
+        SnackbarHelper.show(
+          context,
+          title: 'Error',
+          message: 'Failed to delete task',
+          type: ContentType.failure,
+        );
+      }
+    } catch (e) {
+      SnackbarHelper.show(
+        context,
+        title: 'Error',
+        message: 'Delete error: $e',
+        type: ContentType.failure,
+      );
+    }
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'open':
+        return Colors.orange.shade400;
+      case 'in_progress':
+        return Colors.blue.shade400;
+      case 'review':
+        return Colors.purple.shade400;
+      case 'done':
+        return Colors.green.shade400;
+      case 'blocked':
+        return Colors.red.shade400;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  Color _priorityColor(String priority) {
+    switch (priority) {
+      case 'low':
+        return Colors.green.shade400;
+      case 'medium':
+        return Colors.orange.shade400;
+      case 'high':
+        return Colors.red.shade400;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: BackgroundContainer(
+        child: SafeArea(
+          child: Column(
+            children: [
+              _buildHeader(),
+              Expanded(
+                child: isLoading
+                    ? const Center(
+                        child: CircularProgressIndicator(color: Colors.brown),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: fetchTasks,
+                        child: tasks.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'No Tasks Found',
+                                  style: TextStyle(
+                                    color: Colors.brown,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              )
+                            : ListView.builder(
+                                padding: const EdgeInsets.all(16),
+                                itemCount: tasks.length,
+                                itemBuilder: (context, index) {
+                                  final t = tasks[index];
+                                  return _buildTaskCard(t);
+                                },
+                              ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: AppColors.primaryColor,
+        icon: const Icon(Icons.add, color: Colors.white),
+        label: const Text("New Task", style: TextStyle(color: Colors.white)),
+        onPressed: () async {
+          final created = await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const AddEditTaskScreen()),
+          );
+          if (created == true) fetchTasks();
+        },
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      bottomNavigationBar: CustomBottomNavBar(
+        currentIndex: _selectedIndex,
+        onTap: (index) {
+          setState(() => _selectedIndex = index);
+          // Handle navigation here
+          print("Tapped on $index");
+        },
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            "Tasks",
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: AppColors.primaryColor,
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.brown),
+            onPressed: fetchTasks,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTaskCard(dynamic task) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 6,
+            offset: const Offset(0, 4),
+          )
+        ],
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.all(14),
+        title: Text(
+          task['title'] ?? '',
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+            color: Colors.brown,
+          ),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (task['description'] != null && task['description'].toString().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4.0),
+                child: Text(
+                  task['description'],
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13, color: Colors.black87),
+                ),
+              ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Chip(
+                  label: Text(task['status'] ?? ''),
+                  backgroundColor: _statusColor(task['status'] ?? ''),
+                  labelStyle: const TextStyle(color: Colors.white),
+                ),
+                const SizedBox(width: 8),
+                Chip(
+                  label: Text(task['priority'] ?? ''),
+                  backgroundColor: _priorityColor(task['priority'] ?? ''),
+                  labelStyle: const TextStyle(color: Colors.white),
+                ),
+                const Spacer(),
+                if (task['deadline'] != null)
+                  Row(
+                    children: [
+                      const Icon(Icons.calendar_today, size: 14, color: Colors.brown),
+                      const SizedBox(width: 4),
+                      Text(
+                        DateTime.parse(task['deadline']).toLocal().toString().split(' ')[0],
+                        style: const TextStyle(fontSize: 12, color: Colors.brown),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+            if (task['project'] != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  "📌 Project: ${task['project']['title'] ?? ''}",
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            if (task['client'] != null)
+              Text(
+                "👤 Client: ${task['client']['name'] ?? ''}",
+                style: const TextStyle(fontSize: 12),
+              ),
+          ],
+        ),
+        trailing: PopupMenuButton<String>(
+          onSelected: (value) async {
+            if (value == 'edit') {
+              final updated = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => AddEditTaskScreen(task: task),
+                ),
+              );
+              if (updated == true) fetchTasks();
+            } else if (value == 'delete') {
+              deleteTask(task['_id']);
+            }
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'edit',
+              child: Row(
+                children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Edit')],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'delete',
+              child: Row(
+                children: [Icon(Icons.delete, size: 18, color: Colors.red), SizedBox(width: 8), Text('Delete')],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
