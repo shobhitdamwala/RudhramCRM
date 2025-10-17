@@ -1,20 +1,65 @@
 import jwt from "jsonwebtoken";
+import User from "../Models/userSchema.js";
 
-export const authenticate = (req, res, next) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return res.status(401).json({ message: "Unauthorized: No token provided" });
+
+export const authenticate = async (req, res, next) => {
+  try {
+    console.log('🔐 Authentication middleware called');
+    console.log('Headers:', req.headers);
+
+    // First try Authorization header
+    let token;
+    const authHeader = req.header('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.replace('Bearer ', '').trim();
     }
-    const token = authHeader.split(" ")[1]; 
-    try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || "your_jwt_secret");
-        req.user = decoded; // userId, role available now
-        next();
-    } catch (err) {
-        return res.status(403).json({ message: "Invalid or expired token" });
+
+    // If not in header, try cookies
+    if (!token && req.headers.cookie) {
+      const cookies = req.headers.cookie.split(';').reduce((acc, cookie) => {
+        const [key, value] = cookie.trim().split('=');
+        acc[key] = value;
+        return acc;
+      }, {});
+      token = cookies.auth_token;
     }
+
+    if (!token) {
+      console.log('❌ No token found in header or cookie');
+      return res.status(401).json({
+        success: false,
+        message: 'Access denied. No token provided.'
+      });
+    }
+
+    console.log('🔑 Token received:', token.substring(0, 20) + '...');
+
+    // Verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('✅ Token decoded:', decoded);
+
+    const user = await User.findById(decoded.userId || decoded.id).select('-password');
+    if (!user) {
+      console.log('❌ User not found for ID:', decoded.id);
+      return res.status(401).json({ success: false, message: 'User not found' });
+    }
+
+    req.user = user;
+    console.log('✅ req.user set:', { id: req.user._id, name: req.user.fullName });
+
+    next();
+  } catch (error) {
+    console.error('❌ Authentication error:', error.message);
+
+    if (error.name === 'JsonWebTokenError')
+      return res.status(401).json({ success: false, message: 'Invalid token' });
+
+    if (error.name === 'TokenExpiredError')
+      return res.status(401).json({ success: false, message: 'Token expired' });
+
+    res.status(500).json({ success: false, message: 'Server error in authentication' });
+  }
 };
-
 export const authorize = (roles = []) => {
     if (typeof roles === 'string') {
         roles = [roles];

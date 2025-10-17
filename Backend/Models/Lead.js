@@ -1,35 +1,66 @@
 import mongoose from "mongoose";
 
-const LeadSchema = new mongoose.Schema({
-  source: { type: String, default: 'google_form' },
-  rawForm: { type: Object },
-  name: { type: String, index: true },
-  email: { type: String, index: true },
-  phone: { type: String, index: true },
-  businessName: { type: String },
-  businessCategory: { type: String },
-  subCompanyIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'SubCompany' }],
-  chosenServices: [
-    {
-      title: { type: String },
-      offerings: [{ type: String }]
-    }
-  ],
-
-  status: {
-    type: String,
-    enum: ['new', 'contacted', 'qualified', 'converted', 'lost'],
-    default: 'new'
+const leadLogSchema = new mongoose.Schema(
+  {
+    action: {
+      type: String,
+      enum: ["created", "updated", "whatsappShare"],
+      required: true,
+    },
+    message: { type: String },
+    performedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    timestamp: { type: Date, default: Date.now },
   },
-  assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  notes: [
-    {
-      by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      text: String,
-      createdAt: Date
-    }
-  ],
-}, { timestamps: true });
+  { _id: false }
+);
 
-const Lead = mongoose.model('Lead', LeadSchema);
+const leadSchema = new mongoose.Schema(
+  {
+    token: { type: String, unique: true, required: true }, // ✅ New auto-generated token field
+
+    source: String,
+    rawForm: mongoose.Schema.Types.Mixed,
+    name: { type: String, required: true },
+    email: { type: String },
+    phone: { type: String, required: true },
+    businessName: { type: String },
+    businessCategory: { type: String },
+    subCompanyIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "SubCompany" }],
+    chosenServices: [{ type: String }],
+
+    // ✅ Optional date fields
+    birthDate: { type: Date },
+    anniversaryDate: { type: Date },
+    companyEstablishDate: { type: Date },
+
+    status: {
+      type: String,
+      enum: ["new", "contacted", "qualified", "converted", "lost"],
+      default: "new",
+    },
+    assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    fcmToken: { type: String },
+    logs: [leadLogSchema],
+  },
+  { timestamps: true }
+);
+
+// 📌 Helper: Generate next token
+leadSchema.statics.generateToken = async function () {
+  const currentYear = new Date().getFullYear();
+  const lastLead = await this.findOne().sort({ createdAt: -1 }).exec();
+
+  let nextNumber = 1;
+  if (lastLead && lastLead.token) {
+    const match = lastLead.token.match(/RE-(\d{4})-(\d+)/);
+    if (match && parseInt(match[1]) === currentYear) {
+      nextNumber = parseInt(match[2]) + 1;
+    }
+  }
+
+  const paddedNumber = String(nextNumber).padStart(3, "0");
+  return `RE-${currentYear}-${paddedNumber}`;
+};
+
+const Lead = mongoose.model("Lead", leadSchema);
 export default Lead;

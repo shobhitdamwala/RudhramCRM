@@ -20,10 +20,8 @@ const storage = multer.diskStorage({
   },
 });
 
-// File filter for image validation
 const fileFilter = (req, file, cb) => {
-   console.log("🚨 Uploaded file mimetype:", file.mimetype);
-
+  console.log("🚨 Uploaded file mimetype:", file.mimetype);
   const allowedTypes = [
     "image/jpeg",
     "image/png",
@@ -35,9 +33,12 @@ const fileFilter = (req, file, cb) => {
     "application/octet-stream",
     "binary/octet-stream"
   ];
-
   const ext = path.extname(file.originalname).toLowerCase();
   const allowedExts = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"];
+
+  if ((!file.mimetype || file.mimetype.trim() === '') && allowedExts.includes(ext)) {
+    return cb(null, true);
+  }
 
   if (!allowedTypes.includes(file.mimetype) && !allowedExts.includes(ext)) {
     return cb(new Error("Invalid file type. Only images allowed."), false);

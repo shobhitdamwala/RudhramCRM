@@ -36,7 +36,7 @@ const DriveFolderSchema = new mongoose.Schema(
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      // required: true,
     },
 
     // ✅ New field to differentiate between normal folder or external link

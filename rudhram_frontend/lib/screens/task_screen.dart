@@ -291,6 +291,7 @@ class _TaskScreenState extends State<TaskScreen> {
           onTap: (index) {
             setState(() => _selectedIndex = index);
           },
+          userRole: userData?['role'] ?? '',
         ),
       ),
     );

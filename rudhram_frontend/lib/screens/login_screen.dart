@@ -9,6 +9,7 @@ import '../utils/constants.dart';
 import '../utils/api_config.dart';
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
 import '../utils/snackbar_helper.dart';
+import 'package:rudhram_frontend/screens/teammember_home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -56,32 +57,38 @@ class _LoginScreenState extends State<LoginScreen> {
 
         final userRole = data["user"]["role"];
 
-        if (userRole == "SUPER_ADMIN") {
-          SnackbarHelper.show(
-            context,
-            title: 'Login Successful 🎉',
-            message: 'Welcome back, ${data["user"]["fullName"]}!',
-            type: ContentType.success,
-          );
+        SnackbarHelper.show(
+          context,
+          title: 'Login Successful 🎉',
+          message: 'Welcome back, ${data["user"]["fullName"]}!',
+          type: ContentType.success,
+        );
 
-          await Future.delayed(const Duration(seconds: 1));
+        await Future.delayed(const Duration(seconds: 1));
+
+        if (userRole == "SUPER_ADMIN") {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (_) => const HomeScreen()),
           );
+        } else if (userRole == "TEAM_MEMBER") {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const TeamMemberHomeScreen()),
+          );
         } else {
           SnackbarHelper.show(
             context,
-            title: 'Login Failed ❌',
-            message: data["message"] ?? "Invalid username or password.",
+            title: 'Access Denied ❌',
+            message: 'Your role is not authorized to access this app.',
             type: ContentType.failure,
           );
         }
       } else {
         SnackbarHelper.show(
           context,
-          title: 'Error ⚠️',
-          message: "Something went wrong:",
+          title: 'Login Failed ⚠️',
+          message: data["message"] ?? "Invalid username or password.",
           type: ContentType.failure,
         );
       }

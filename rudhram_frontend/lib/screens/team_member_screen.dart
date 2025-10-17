@@ -10,6 +10,8 @@ import '../widgets/background_container.dart';
 import '../utils/api_config.dart';
 import '../utils/snackbar_helper.dart';
 import '../widgets/profile_header.dart';
+import 'package:shimmer/shimmer.dart';
+
 
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
 
@@ -344,7 +346,7 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
                     const SizedBox(height: 20),
                     _buildAddMemberButton(),
                     const SizedBox(height: 25),
-                    CustomBottomNavBar(currentIndex: 4, onTap: (i) {}),
+                    CustomBottomNavBar(currentIndex: 4, onTap: (i) {},userRole: userData?['role'] ?? '',),
                   ],
                 ),
         ),
@@ -944,4 +946,110 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
       ),
     );
   }
+  Widget _buildShimmerHeader() {
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    child: Row(
+      children: [
+        Shimmer.fromColors(
+          baseColor: Colors.grey.shade300,
+          highlightColor: Colors.grey.shade100,
+          child: const CircleAvatar(radius: 25),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Shimmer.fromColors(
+                baseColor: Colors.grey.shade300,
+                highlightColor: Colors.grey.shade100,
+                child: Container(
+                  height: 16,
+                  width: 120,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Shimmer.fromColors(
+                baseColor: Colors.grey.shade300,
+                highlightColor: Colors.grey.shade100,
+                child: Container(
+                  height: 14,
+                  width: 180,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+Widget _buildShimmerSubCompanyList() {
+  return SizedBox(
+    height: 85,
+    child: ListView.builder(
+      scrollDirection: Axis.horizontal,
+      itemCount: 4,
+      itemBuilder: (_, i) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Column(
+          children: [
+            Shimmer.fromColors(
+              baseColor: Colors.grey.shade300,
+              highlightColor: Colors.grey.shade100,
+              child: const CircleAvatar(radius: 25),
+            ),
+            const SizedBox(height: 5),
+            Shimmer.fromColors(
+              baseColor: Colors.grey.shade300,
+              highlightColor: Colors.grey.shade100,
+              child: Container(
+                height: 10,
+                width: 50,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _buildShimmerClientStrip() {
+  return SizedBox(
+    height: 85,
+    child: ListView.builder(
+      scrollDirection: Axis.horizontal,
+      itemCount: 5,
+      itemBuilder: (_, i) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Column(
+          children: [
+            Shimmer.fromColors(
+              baseColor: Colors.grey.shade300,
+              highlightColor: Colors.grey.shade100,
+              child: const CircleAvatar(radius: 25),
+            ),
+            const SizedBox(height: 5),
+            Shimmer.fromColors(
+              baseColor: Colors.grey.shade300,
+              highlightColor: Colors.grey.shade100,
+              child: Container(
+                height: 10,
+                width: 50,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 }

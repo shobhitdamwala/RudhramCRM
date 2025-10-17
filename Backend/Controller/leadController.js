@@ -1,7 +1,10 @@
 import Client from "../Models/Client.js";
 import Lead from "../Models/Lead.js";
 import SubCompany from "../Models/SubCompany.js";
+import DriveFolder from "../Models/DriveFolder.js";
+import mongoose from "mongoose";
 
+// 🟢 Add Lead
 export const addLead = async (req, res) => {
   try {
     const {
@@ -16,9 +19,11 @@ export const addLead = async (req, res) => {
       chosenServices,
       status,
       assignedTo,
+      birthDate,
+      anniversaryDate,
+      companyEstablishDate,
     } = req.body;
 
-    // Basic validation
     if (!name || !phone) {
       return res.status(400).json({
         success: false,
@@ -26,7 +31,11 @@ export const addLead = async (req, res) => {
       });
     }
 
+    // ✅ Generate unique token
+    const token = await Lead.generateToken();
+
     const newLead = new Lead({
+      token,
       source,
       rawForm,
       name,
@@ -38,6 +47,16 @@ export const addLead = async (req, res) => {
       chosenServices,
       status,
       assignedTo,
+      birthDate: birthDate || null,
+      anniversaryDate: anniversaryDate || null,
+      companyEstablishDate: companyEstablishDate || null,
+      logs: [
+        {
+          action: "created",
+          message: `Lead created by ${req.user?.fullName || "system"}`,
+          performedBy: req.user?._id || null,
+        },
+      ],
     });
 
     const savedLead = await newLead.save();
@@ -57,6 +76,7 @@ export const addLead = async (req, res) => {
   }
 };
 
+// 🟡 Get All Leads
 export const getAllLeads = async (req, res) => {
   try {
     const leads = await Lead.find()
@@ -78,10 +98,10 @@ export const getAllLeads = async (req, res) => {
   }
 };
 
+// 🟢 Get Lead By ID
 export const getLeadById = async (req, res) => {
   try {
     const { id } = req.params;
-
     const lead = await Lead.findById(id)
       .populate("assignedTo", "fullName email")
       .populate("subCompanyIds", "name");
@@ -106,7 +126,7 @@ export const getLeadById = async (req, res) => {
   }
 };
 
-
+// 🔴 Delete Lead
 export const deleteLead = async (req, res) => {
   try {
     const { id } = req.params;
@@ -134,38 +154,34 @@ export const deleteLead = async (req, res) => {
     });
   }
 };
+
 export const convertLeadToClient = async (req, res) => {
   try {
     const { leadId } = req.params;
     const userId = req.user?._id;
 
-    // 1️⃣ Find the lead
-    const lead = await Lead.findById(leadId).populate('subCompanyIds', 'name');
-    if (!lead) {
+    const lead = await Lead.findById(leadId).populate("subCompanyIds", "name");
+    if (!lead)
       return res.status(404).json({ success: false, message: "Lead not found" });
-    }
 
-    // 2️⃣ Check if already converted
     const existingClient = await Client.findOne({ leadId: lead._id });
-    if (existingClient) {
+    if (existingClient)
       return res.status(400).json({
         success: false,
         message: "Lead has already been converted to a client.",
       });
-    }
 
-    // 3️⃣ Prepare meta data
-    const subCompanyNames = lead.subCompanyIds.map(sub => sub.name);
+    const subCompanyNames = lead.subCompanyIds.map((s) => s.name);
     const metaData = {
       source: lead.source,
       businessCategory: lead.businessCategory,
       chosenServices: lead.chosenServices,
-      subCompanyIds: lead.subCompanyIds.map(sub => sub._id),
-      subCompanyNames: subCompanyNames,
+      subCompanyIds: lead.subCompanyIds.map((s) => s._id),
+      subCompanyNames,
     };
 
-    // 4️⃣ Create new client using lead data
     const newClient = new Client({
+      clientId: lead._id.toString(),
       leadId: lead._id,
       name: lead.name,
       email: lead.email,
@@ -174,23 +190,193 @@ export const convertLeadToClient = async (req, res) => {
       meta: metaData,
       createdBy: userId,
     });
-
     await newClient.save();
 
-    // 5️⃣ Update lead status to "converted"
     lead.status = "converted";
+    lead.logs.push({
+      action: "updated",
+      message: "Lead converted to client",
+      performedBy: userId,
+    });
     await lead.save();
+
+    const token = lead.token || `CLIENT-${lead._id.toString().slice(-6)}`;
+    const createdFolders = [];
+
+    for (const subCompany of lead.subCompanyIds) {
+      const exists = await DriveFolder.findOne({
+        subCompany: subCompany._id,
+        name: token,
+      });
+      if (!exists) {
+        const folder = await DriveFolder.create({
+          subCompany: subCompany._id,
+          name: token,
+          createdBy: userId,
+          type: "folder",
+        });
+        createdFolders.push(folder);
+      }
+    }
 
     res.status(201).json({
       success: true,
-      message: "Lead successfully converted to client.",
+      message: "Lead successfully converted to client and folders created.",
       client: newClient,
+      createdFolders,
     });
   } catch (error) {
     console.error("Error converting lead:", error);
     res.status(500).json({
       success: false,
       message: "Server error while converting lead.",
+      error: error.message,
+    });
+  }
+};
+
+
+// 🟢 Update Lead Status
+export const updateLeadStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const allowedStatuses = ["new", "contacted", "qualified", "converted", "lost"];
+    if (!status || !allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status value. Allowed: ${allowedStatuses.join(", ")}`,
+      });
+    }
+
+    const lead = await Lead.findById(id);
+    if (!lead) {
+      return res.status(404).json({ success: false, message: "Lead not found." });
+    }
+
+    lead.status = status;
+    lead.logs.push({
+      action: "updated",
+      message: `Status updated to ${status}`,
+      performedBy: req.user?._id || null,
+    });
+    await lead.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Lead status updated successfully.",
+      data: lead,
+    });
+  } catch (error) {
+    console.error("Error updating lead status:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while updating lead status.",
+      error: error.message,
+    });
+  }
+};
+
+// 🟢 Update Lead (All Fields)
+export const updateLead = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const {
+      source,
+      rawForm,
+      name,
+      email,
+      phone,
+      businessName,
+      businessCategory,
+      subCompanyIds,
+      chosenServices,
+      status,
+      assignedTo,
+      birthDate,
+      anniversaryDate,
+      companyEstablishDate,
+    } = req.body;
+
+    if (!name || !phone) {
+      return res.status(400).json({
+        success: false,
+        message: "Name and phone number are required.",
+      });
+    }
+
+    const lead = await Lead.findById(id);
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        message: "Lead not found.",
+      });
+    }
+
+    lead.source = source || lead.source;
+    lead.rawForm = rawForm || lead.rawForm;
+    lead.name = name;
+    lead.email = email || lead.email;
+    lead.phone = phone;
+    lead.businessName = businessName || lead.businessName;
+    lead.businessCategory = businessCategory || lead.businessCategory;
+    lead.subCompanyIds = subCompanyIds?.length ? subCompanyIds : lead.subCompanyIds;
+    lead.chosenServices = chosenServices?.length ? chosenServices : lead.chosenServices;
+    lead.status = status || lead.status;
+    lead.assignedTo = assignedTo || lead.assignedTo;
+    lead.birthDate = birthDate || lead.birthDate;
+    lead.anniversaryDate = anniversaryDate || lead.anniversaryDate;
+    lead.companyEstablishDate = companyEstablishDate || lead.companyEstablishDate;
+
+    lead.logs.push({
+      action: "updated",
+      message: `Lead updated by ${req.user?.fullName || "system"}`,
+      performedBy: req.user?._id || null,
+    });
+
+    const updatedLead = await lead.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Lead updated successfully.",
+      data: updatedLead,
+    });
+  } catch (error) {
+    console.error("Error updating lead:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while updating lead.",
+      error: error.message,
+    });
+  }
+};
+
+// 📱 Log Lead WhatsApp Share
+export const logLeadWhatsappShare = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const lead = await Lead.findById(id);
+    if (!lead) return res.status(404).json({ success: false, message: "Lead not found." });
+
+    lead.logs.push({
+      action: "whatsappShare",
+      message: "Lead shared on WhatsApp",
+      performedBy: req.user?._id || null,
+    });
+    await lead.save();
+
+    res.status(200).json({
+      success: true,
+      message: "WhatsApp share logged successfully.",
+      data: lead,
+    });
+  } catch (error) {
+    console.error("Error logging WhatsApp share:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while logging WhatsApp share.",
       error: error.message,
     });
   }

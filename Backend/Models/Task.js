@@ -42,7 +42,12 @@ const TaskSchema = new mongoose.Schema(
         extra: Object,
       },
     ],
+    // models/Task.js
+deadlineNotified: { type: Boolean, default: false },
+assignedNotified: { type: Boolean, default: false },
+
   },
+  
   { timestamps: true }
 );
 

@@ -1,5 +1,9 @@
 import express from "express";
 import User from "../Models/userSchema.js";
+import SubCompany from "../Models/SubCompany.js";
+import Client from "../Models/Client.js";
+import Task from "../Models/Task.js";
+import TaskAssignment from "../Models/TaskAssignment.js";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 
@@ -305,6 +309,60 @@ export const updateTeamMember = async (req, res) => {
 };
 
 
+export const updateSuperAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid Super Admin ID." });
+    }
+
+    const existingSuperAdmin = await User.findOne({ _id: id, role: "SUPER_ADMIN" }).select("+passwordHash");
+    if (!existingSuperAdmin) {
+      return res.status(404).json({ success: false, message: "Super Admin not found." });
+    }
+
+    const { fullName, email, phone, city, state, password, role } = req.body;
+
+    // 🧾 Handle avatar upload
+    let avatarUrl = existingSuperAdmin.avatarUrl;
+    if (req.file) {
+      avatarUrl = `/uploads/${req.file.filename}`;
+    }
+
+    // 🔐 Handle password update
+    let passwordHash = existingSuperAdmin.passwordHash;
+    if (password && password.trim().length > 0) {
+      passwordHash = await User.hashPassword(password);
+    }
+
+    // 🧩 Update fields
+    existingSuperAdmin.fullName = fullName || existingSuperAdmin.fullName;
+    existingSuperAdmin.email = email || existingSuperAdmin.email;
+    existingSuperAdmin.phone = phone || existingSuperAdmin.phone;
+    existingSuperAdmin.city = city || existingSuperAdmin.city;
+    existingSuperAdmin.state = state || existingSuperAdmin.state;
+    existingSuperAdmin.avatarUrl = avatarUrl;
+    existingSuperAdmin.passwordHash = passwordHash;
+    if (role) existingSuperAdmin.role = role;
+
+    const updatedSuperAdmin = await existingSuperAdmin.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Super Admin updated successfully.",
+      superAdmin: updatedSuperAdmin,
+    });
+  } catch (err) {
+    console.error("Update Super Admin error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while updating Super Admin.",
+      error: err.message,
+    });
+  }
+};
+
 // ✅ Delete a team member by ID
 export const deleteTeamMember = async (req, res) => {
   try {
@@ -341,5 +399,134 @@ export const deleteTeamMember = async (req, res) => {
       message: "Server error while deleting team member.",
       error: err.message,
     });
+  }
+};
+
+
+export const getTeamMemberDetails = async (req, res) => {
+  try {
+    const { teamMemberId } = req.params;
+
+    // ✅ 1. Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(teamMemberId)) {
+      return res.status(400).json({ success: false, message: "Invalid Team Member ID" });
+    }
+
+    const teamMemberObjectId = new mongoose.Types.ObjectId(teamMemberId);
+
+    // ✅ 2. Fetch Team Member
+    const teamMember = await User.findById(teamMemberObjectId)
+      .select("fullName email avatarUrl role subCompanyIds")
+      .lean();
+
+    if (!teamMember) {
+      return res.status(404).json({ success: false, message: "Team Member not found" });
+    }
+
+    // ✅ 3. Fetch all assignments linked to this team member
+    const assignments = await TaskAssignment.find({ user: teamMemberObjectId })
+      .populate({
+        path: "task",
+        populate: {
+          path: "client",
+          select: "name businessName meta.subCompanyIds meta.subCompanyNames",
+        },
+        select: "title description status client",
+      })
+      .lean();
+
+    // If no assignments found
+    if (!assignments.length) {
+      return res.json({
+        success: true,
+        teamMember,
+        subCompanies: [],
+        clients: [],
+      });
+    }
+
+    // ✅ 4. Group tasks by client
+    const clientMap = {};
+    const subCompanyIdSet = new Set();
+
+    for (const a of assignments) {
+      const task = a.task;
+      const client = task?.client;
+      if (!client) continue;
+
+      const clientId = client._id.toString();
+      const metaSubCompanyIds = client.meta?.subCompanyIds || [];
+      const metaSubCompanyNames = client.meta?.subCompanyNames || [];
+
+      // collect subcompany IDs
+      for (const id of metaSubCompanyIds) {
+        if (mongoose.Types.ObjectId.isValid(id)) {
+          subCompanyIdSet.add(id.toString());
+        }
+      }
+
+      if (!clientMap[clientId]) {
+        clientMap[clientId] = {
+          _id: client._id,
+          name: client.name,
+          businessName: client.businessName,
+          subCompanyIds: metaSubCompanyIds,
+          subCompanyNames: metaSubCompanyNames,
+          tasks: [],
+        };
+      }
+
+      clientMap[clientId].tasks.push({
+        _id: task._id,
+        title: task.title,
+        description: task.description,
+        status: task.status,
+        assignmentStatus: a.status,
+        progress: a.progress,
+      });
+    }
+
+    const clientsData = Object.values(clientMap);
+
+    // ✅ 5. Fetch SubCompany details for all meta.subCompanyIds
+    let subCompanies = [];
+    if (subCompanyIdSet.size > 0) {
+      subCompanies = await SubCompany.find({
+        _id: { $in: Array.from(subCompanyIdSet) },
+      })
+        .select("_id name logoUrl")
+        .lean();
+    }
+
+    // ✅ 6. Response
+    return res.json({
+      success: true,
+      teamMember,
+      subCompanies,
+      clients: clientsData,
+    });
+
+  } catch (err) {
+    console.error("❌ Error fetching team member details:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+export const saveFcmToken = async (req, res) => {
+  try {
+    const { userId, fcmToken, type } = req.body; // type = "lead" or "client"
+    if (!userId || !fcmToken) return res.status(400).json({ message: "Missing data" });
+
+    if (type === "lead") {
+      await Lead.findByIdAndUpdate(userId, { fcmToken }, { new: true });
+    } else if (type === "client") {
+      await Client.findByIdAndUpdate(userId, { fcmToken }, { new: true });
+    } else {
+      return res.status(400).json({ message: "Invalid user type" });
+    }
+
+    res.status(200).json({ success: true, message: "Token saved successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };

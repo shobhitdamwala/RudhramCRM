@@ -2,74 +2,89 @@ import mongoose from "mongoose";
 import Meeting from "../Models/Meeting.js";
 import Lead from "../Models/Lead.js";
 import Client from "../Models/Client.js";
+import cron from "node-cron";
 
+// Helper function to share meeting details (simulate SMS)
+const shareMeetingDetails = async (phone, meeting) => {
+  if (!phone) {
+    console.warn("⚠️ No phone number found for sharing meeting details.");
+    return;
+  }
 
+  const message = `
+📅 *Meeting Scheduled!*
+
+Title: ${meeting.title}
+Agenda: ${meeting.agenda || "N/A"}
+Date: ${new Date(meeting.startTime).toLocaleString()}
+Location: ${meeting.location || "Online"}
+Meeting Link: ${meeting.meetingLink || "—"}
+${meeting.meetingPassword ? `Password: ${meeting.meetingPassword}` : ""}
+`;
+
+  // 🟡 For now, just log to console (replace this with SMS API like Twilio or MSG91)
+  console.log(`📲 Sending meeting details to ${phone}:\n${message}`);
+};
 
 export const addMeeting = async (req, res) => {
   try {
     const {
-      title,
-      agenda,
-      subCompany,
-      organizer,
-      participants,
-      lead,
-      client,
-      startTime,
-      endTime,
-      location,
-      meetingLink,
-      notes,
+      title, agenda, subCompany, organizer, participants,
+      lead, client, startTime, endTime, location,
+      meetingLink, meetingPassword, notes
     } = req.body;
 
-    if (!title) return res.status(400).json({ success: false, message: "Title is required" });
-    if (!startTime || !endTime)
-      return res.status(400).json({ success: false, message: "Start and End time are required" });
+    if (!title || !startTime || !endTime)
+      return res.status(400).json({ success: false, message: "Missing required fields" });
 
-    // Must have either lead or client
-    if (!lead && !client)
-      return res.status(400).json({
-        success: false,
-        message: "Meeting must be associated with either a Lead or a Client",
-      });
+    let targetUser = null;
+    let fcmToken = null;
 
     if (lead) {
-      const leadExists = await Lead.findById(lead);
-      if (!leadExists)
-        return res.status(404).json({ success: false, message: "Lead not found" });
+      targetUser = await Lead.findById(lead);
+      fcmToken = targetUser?.fcmToken;
+    } else if (client) {
+      targetUser = await Client.findById(client);
+      fcmToken = targetUser?.fcmToken;
     }
 
-    if (client) {
-      const clientExists = await Client.findById(client);
-      if (!clientExists)
-        return res.status(404).json({ success: false, message: "Client not found" });
-    }
     const meeting = await Meeting.create({
-      title,
-      agenda,
-      subCompany,
-      organizer: organizer || req.user?._id,
-      participants,
-      lead,
-      client,
-      startTime,
-      endTime,
-      location,
-      meetingLink,
-      notes,
+      title, agenda, subCompany, organizer,
+      participants, lead, client,
+      startTime, endTime, location, meetingLink, meetingPassword, notes,
     });
+
+    // ✅ Send Push Notification
+    if (fcmToken) {
+      const payload = {
+        notification: {
+          title: "📅 New Meeting Scheduled",
+          body: `Title: ${meeting.title}\nDate: ${new Date(meeting.startTime).toLocaleString()}`,
+        },
+        data: {
+          meetingId: meeting._id.toString(),
+          click_action: "FLUTTER_NOTIFICATION_CLICK",
+        },
+      };
+
+      await admin.messaging().sendToDevice(fcmToken, payload);
+      console.log("✅ Push Notification sent to:", targetUser.name);
+    } else {
+      console.log("⚠️ No FCM token found for lead/client");
+    }
 
     res.status(201).json({
       success: true,
-      message: "Meeting added successfully",
+      message: "Meeting created and notification sent",
       data: meeting,
     });
   } catch (err) {
-    console.error("Error adding meeting:", err);
+    console.error("❌ Error adding meeting:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
+// 🔄 Other methods remain the same (updateMeeting, deleteMeeting, getAllMeetings, getMeetingById)
 
 export const updateMeeting = async (req, res) => {
   try {
@@ -193,3 +208,32 @@ export const getMeetingById = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+cron.schedule("*/5 * * * *", async () => { // runs every 5 minutes
+  const now = new Date();
+  const fifteenMinLater = new Date(now.getTime() + 15 * 60000);
+
+  const meetings = await Meeting.find({
+    startTime: { $lte: fifteenMinLater, $gte: now },
+    startNotified: false,
+  });
+
+  for (const meeting of meetings) {
+    const target =
+      meeting.lead
+        ? await Lead.findById(meeting.lead)
+        : await Client.findById(meeting.client);
+
+    if (target?.fcmToken) {
+      await admin.messaging().sendToDevice(target.fcmToken, {
+        notification: {
+          title: "⏰ Meeting Reminder",
+          body: `Your meeting "${meeting.title}" starts soon!`,
+        },
+      });
+
+      meeting.startNotified = true;
+      await meeting.save();
+    }
+  }
+});

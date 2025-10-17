@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:rudhram_frontend/screens/drive_screen.dart';
 import 'package:rudhram_frontend/utils/custom_bottom_nav.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/api_config.dart';
@@ -169,6 +170,14 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
                                         const MeetingScreen(), // 👈 navigate here
                                   ),
                                 );
+                              } else if (action['label'] == "Drive") {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const DriveScreen(), // 👈 navigate here
+                                  ),
+                                );
                               } else {
                                 print("Tapped on ${action['label']}");
                               }
@@ -212,6 +221,7 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
                     onTap: (index) {
                       print("Tapped on $index");
                     },
+                    userRole: userData?['role'] ?? '',
                   ),
                 ],
               );
@@ -263,15 +273,13 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
   }
 
   /// 🔸 Bottom Navbar (same as Home)
-
   final List<Map<String, dynamic>> _actions = [
     {'icon': Icons.calendar_month_outlined, 'label': "New Meeting"},
     {'icon': Icons.task_alt_outlined, 'label': "New Task"},
-    {'icon': Icons.event_outlined, 'label': "New Event"},
+    {'icon': Icons.group_add_outlined, 'label': "Team Member"},
+    {'icon': Icons.cloud_upload_outlined, 'label': "Drive"},
     {'icon': Icons.receipt_long_outlined, 'label': "New Invoice"},
     {'icon': Icons.currency_rupee_outlined, 'label': "New Receipt"},
-    {'icon': Icons.cloud_upload_outlined, 'label': "Drive"},
     {'icon': Icons.notifications_active_outlined, 'label': "Notify"},
-    {'icon': Icons.group_add_outlined, 'label': "Team Member"},
   ];
 }

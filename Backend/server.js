@@ -34,6 +34,21 @@ app.use('/api/v1/client',clientRoutes);
 
 app.use("/uploads", express.static("uploads"));
 
+app.use((err, req, res, next) => {
+  console.error("❌ Global error:", err);
+  if (err instanceof multer.MulterError || err.message.includes("Invalid file type")) {
+    return res.status(400).json({
+      success: false,
+      message: err.message || "Image upload failed.",
+    });
+  }
+  res.status(500).json({
+    success: false,
+    message: err.message || "Internal server error",
+  });
+});
+
+
 
 app.listen(process.env.PORT, "0.0.0.0", () => {
   console.log(`✅ Server is running on http://0.0.0.0:${process.env.PORT}`);

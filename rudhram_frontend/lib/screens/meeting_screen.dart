@@ -13,6 +13,8 @@ import '../utils/custom_bottom_nav.dart';
 import '../screens/meeting_details_screen.dart';
 import '../utils/snackbar_helper.dart';
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
+import 'package:share_plus/share_plus.dart';
+
 
 /// ------------------------------
 /// MEETING SCREEN (List + CRUD)
@@ -83,7 +85,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
       }
     } catch (_) {}
   }
-
   Future<void> fetchMeetings() async {
     setState(() => isLoading = true);
     try {
@@ -236,7 +237,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
               ),
               // Bottom spacing so it never clashes with system navbar
               const SizedBox(height: 6),
-              CustomBottomNavBar(currentIndex: _currentIndex, onTap: (i) {}),
+              CustomBottomNavBar(currentIndex: _currentIndex, onTap: (i) {},userRole: userData?['role'] ?? '',),
             ],
           ),
         ),
@@ -285,113 +286,143 @@ class _MeetingScreenState extends State<MeetingScreen> {
           ),
         ],
       ),
-      child: ListTile(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => MeetingDetailsScreen(meeting: m)),
-          );
-        },
-
-        contentPadding: const EdgeInsets.all(14),
-        leading: Container(
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            color: AppColors.primaryColor.withOpacity(0.15),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(Icons.event_note, color: Colors.brown),
-        ),
-        title: Text(
-          m['title'] ?? '-',
-          style: const TextStyle(
-            color: Colors.brown,
-            fontWeight: FontWeight.w700,
-          ),
-          overflow: TextOverflow.ellipsis,
-          maxLines: 2, // 👈 allow wrapping to 2 lines
-        ),
-
-        subtitle: Column(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 4),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.schedule, size: 14, color: Colors.brown),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    start != null && end != null
-                        ? '${_dtf.format(start)} — ${DateFormat('h:mm a').format(end)}'
-                        : '-',
-                    style: const TextStyle(fontSize: 12),
-                    softWrap: true,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: AppColors.primaryColor.withOpacity(0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.event_note, color: Colors.brown),
             ),
-
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                const Icon(Icons.person_outline, size: 14, color: Colors.brown),
-                const SizedBox(width: 6),
-                Text(withName, style: const TextStyle(fontSize: 12)),
-              ],
-            ),
-            if ((m['location'] ?? '').toString().isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Row(
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(
-                    Icons.place_outlined,
-                    size: 14,
-                    color: Colors.brown,
+                  // Header Row (Title + Share Icon)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          m['title'] ?? '-',
+                          style: const TextStyle(
+                            color: Colors.brown,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 2,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.share, color: Colors.brown),
+                        tooltip: 'Share meeting',
+                        onPressed: () {
+                          final shareText =
+                              '''
+📅 *${m['title'] ?? 'Meeting'}*
+🕒 ${m['startTime'] ?? ''} - ${m['endTime'] ?? ''}
+📍 ${m['location'] ?? 'Online'}
+🔗 ${m['meetingLink'] ?? ''}
+${m['meetingPassword'] != null && m['meetingPassword'].toString().isNotEmpty ? '🔒 Password: ${m['meetingPassword']}' : ''}
+''';
+                          Share.share(shareText, subject: 'Meeting Details');
+                        },
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      m['location'],
-                      style: const TextStyle(fontSize: 12),
+
+                  const SizedBox(height: 4),
+
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.schedule, size: 14, color: Colors.brown),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          start != null && end != null
+                              ? '${_dtf.format(start)} — ${DateFormat('h:mm a').format(end)}'
+                              : '-',
+                          style: const TextStyle(fontSize: 12),
+                          softWrap: true,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.person_outline,
+                        size: 14,
+                        color: Colors.brown,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(withName, style: const TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                  if ((m['location'] ?? '').toString().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.place_outlined,
+                          size: 14,
+                          color: Colors.brown,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            m['location'],
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
+                  ],
                 ],
               ),
-            ],
-          ],
-        ),
-        trailing: PopupMenuButton<String>(
-          onSelected: (v) async {
-            if (v == 'view') {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => MeetingDetailsScreen(meeting: m),
-                ),
-              );
-            } else if (v == 'edit') {
-              final updated = await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => AddEditMeetingScreen(
-                    meeting: m,
-                    currentUserId: userData?['_id'],
-                  ),
-                ),
-              );
-              if (updated == true) fetchMeetings();
-            } else if (v == 'delete') {
-              deleteMeeting(m['_id']);
-            }
-          },
-          itemBuilder: (context) => const [
-            PopupMenuItem(value: 'view', child: Text('View Details')),
-            PopupMenuItem(value: 'edit', child: Text('Edit')),
-            PopupMenuItem(value: 'delete', child: Text('Delete')),
+            ),
+            // Right-side menu button (optional)
+            PopupMenuButton<String>(
+              onSelected: (v) async {
+                if (v == 'view') {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MeetingDetailsScreen(meeting: m),
+                    ),
+                  );
+                } else if (v == 'edit') {
+                  final updated = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AddEditMeetingScreen(
+                        meeting: m,
+                        currentUserId: userData?['_id'],
+                      ),
+                    ),
+                  );
+                  if (updated == true) fetchMeetings();
+                } else if (v == 'delete') {
+                  deleteMeeting(m['_id']);
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'view', child: Text('View Details')),
+                PopupMenuItem(value: 'edit', child: Text('Edit')),
+                PopupMenuItem(value: 'delete', child: Text('Delete')),
+              ],
+            ),
           ],
         ),
       ),
@@ -430,6 +461,7 @@ class _AddEditMeetingScreenState extends State<AddEditMeetingScreen> {
   final _locationCtrl = TextEditingController();
   final _meetingLinkCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
 
   DateTime? _start;
   DateTime? _end;
@@ -480,6 +512,7 @@ class _AddEditMeetingScreenState extends State<AddEditMeetingScreen> {
     _agendaCtrl.text = m['agenda'] ?? '';
     _locationCtrl.text = m['location'] ?? '';
     _meetingLinkCtrl.text = m['meetingLink'] ?? '';
+    _passwordCtrl.text = m['meetingPassword'] ?? '';
     _notesCtrl.text = m['notes'] ?? '';
     _start = m['startTime'] != null
         ? DateTime.parse(m['startTime']).toLocal()
@@ -593,6 +626,7 @@ class _AddEditMeetingScreenState extends State<AddEditMeetingScreen> {
       'endTime': _end?.toUtc().toIso8601String(),
       'location': _locationCtrl.text.trim(),
       'meetingLink': _meetingLinkCtrl.text.trim(),
+      'meetingPassword': _passwordCtrl.text.trim(),
       'notes': _notesCtrl.text.trim(),
     }..removeWhere((k, v) => v == null || (v is String && v.isEmpty));
 
@@ -883,29 +917,90 @@ class _AddEditMeetingScreenState extends State<AddEditMeetingScreen> {
 
                     _textField(_locationCtrl, 'Location', Icons.place_outlined),
                     _textField(_meetingLinkCtrl, 'Meeting Link', Icons.link),
-                    _textField(_notesCtrl, 'Notes', Icons.notes, maxLines: 3),
 
+                    // ✅ Meeting Password (with visibility toggle)
+                    const Text(
+                      'Meeting Password (optional)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.brown,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+
+                    StatefulBuilder(
+                      builder: (context, setStatePassword) {
+                        bool isVisible = false;
+                        return TextFormField(
+                          controller: _passwordCtrl, // ✅ use global controller
+                          obscureText: !isVisible,
+                          decoration: InputDecoration(
+                            prefixIcon: const Icon(
+                              Icons.lock_outline,
+                              color: Colors.brown,
+                            ),
+                            labelText: 'Meeting Password',
+                            filled: true,
+                            fillColor: Colors.white,
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                isVisible
+                                    ? Icons.visibility
+                                    : Icons.visibility_off,
+                                color: Colors.brown,
+                              ),
+                              onPressed: () {
+                                setStatePassword(() {
+                                  isVisible = !isVisible;
+                                });
+                              },
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: AppColors.primaryColor,
+                                width: 1.5,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 12),
+
+                    _textField(_notesCtrl, 'Notes', Icons.notes, maxLines: 3),
                     const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
+
+                    Center(
                       child: ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.primaryColor,
-                          minimumSize: const Size(double.infinity, 52),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 14,
+                          ),
                         ),
-                        onPressed: _save,
-                        icon: const Icon(Icons.check, color: Colors.white),
+                        onPressed: isLoading ? null : _save,
+                        icon: const Icon(Icons.save, color: Colors.white),
                         label: Text(
                           widget.meeting == null
-                              ? 'Create Meeting'
+                              ? 'Add Meeting'
                               : 'Update Meeting',
-                          style: const TextStyle(color: Colors.white),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
                         ),
                       ),
                     ),
+                    const SizedBox(height: 40),
                   ],
                 ),
               ),

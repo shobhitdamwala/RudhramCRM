@@ -6,10 +6,13 @@ import '../utils/constants.dart';
 import '../utils/api_config.dart';
 import '../utils/snackbar_helper.dart';
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:flutter/services.dart';
 
 class MeetingDetailsScreen extends StatefulWidget {
   final Map<String, dynamic> meeting;
-  const MeetingDetailsScreen({Key? key, required this.meeting}) : super(key: key);
+  const MeetingDetailsScreen({Key? key, required this.meeting})
+    : super(key: key);
 
   @override
   State<MeetingDetailsScreen> createState() => _MeetingDetailsScreenState();
@@ -27,11 +30,14 @@ class _MeetingDetailsScreenState extends State<MeetingDetailsScreen> {
 
   Future<void> _fetchSubCompanyName() async {
     if (widget.meeting['subCompany'] == null ||
-        widget.meeting['subCompany'].toString().isEmpty) return;
+        widget.meeting['subCompany'].toString().isEmpty)
+      return;
 
     setState(() => isLoadingSubCompany = true);
     try {
-      final res = await http.get(Uri.parse("${ApiConfig.baseUrl}/subcompany/getsubcompany"));
+      final res = await http.get(
+        Uri.parse("${ApiConfig.baseUrl}/subcompany/getsubcompany"),
+      );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final list = (data['data'] as List);
@@ -78,17 +84,37 @@ class _MeetingDetailsScreenState extends State<MeetingDetailsScreen> {
 
     final participantsNames = (meeting['participants'] is List)
         ? (meeting['participants'] as List)
-            .map((p) => p is Map
-                ? (p['fullName']?.toString() ?? '')
-                : p.toString())
-            .join(', ')
+              .map(
+                (p) =>
+                    p is Map ? (p['fullName']?.toString() ?? '') : p.toString(),
+              )
+              .join(', ')
         : '';
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Meeting Details'),
         backgroundColor: AppColors.primaryColor,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share, color: Colors.white),
+            tooltip: 'Share meeting',
+            onPressed: () {
+              final m = widget.meeting;
+              final shareText =
+                  '''
+📅 *${m['title'] ?? 'Meeting'}*
+🕒 ${m['startTime'] ?? ''} - ${m['endTime'] ?? ''}
+📍 ${m['location'] ?? 'Online'}
+🔗 ${m['meetingLink'] ?? ''}
+${m['meetingPassword'] != null && m['meetingPassword'].toString().isNotEmpty ? '🔒 Password: ${m['meetingPassword']}' : ''}
+''';
+              Share.share(shareText, subject: 'Meeting Details');
+            },
+          ),
+        ],
       ),
+
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -100,39 +126,69 @@ class _MeetingDetailsScreenState extends State<MeetingDetailsScreen> {
                 borderRadius: BorderRadius.circular(14),
               ),
               elevation: 3,
-              color: const Color.fromARGB(255, 255, 255, 255),
+              color: Colors.white,
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: Column(
+                child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      meeting['title']?.toString() ?? '',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.brown,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            meeting['title']?.toString() ?? '',
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.brown,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            meeting['agenda']?.toString() ?? '',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      meeting['agenda']?.toString() ?? '',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: Colors.black87,
-                      ),
+                    IconButton(
+                      icon: const Icon(Icons.share, color: Colors.brown),
+                      tooltip: 'Share meeting',
+                      onPressed: () {
+              final m = widget.meeting;
+              final shareText =
+                  '''
+📅 *${m['title'] ?? 'Meeting'}*
+🕒 ${m['startTime'] ?? ''} - ${m['endTime'] ?? ''}
+📍 ${m['location'] ?? 'Online'}
+🔗 ${m['meetingLink'] ?? ''}
+${m['meetingPassword'] != null && m['meetingPassword'].toString().isNotEmpty ? '🔒 Password: ${m['meetingPassword']}' : ''}
+''';
+              Share.share(shareText, subject: 'Meeting Details');
+            }, // same function
                     ),
                   ],
                 ),
               ),
             ),
+
             const SizedBox(height: 16),
 
             // 📅 Date and Time
-            _infoRow(Icons.calendar_today_outlined, 'Start',
-                start != null ? dtFormat.format(start.toLocal()) : ''),
-            _infoRow(Icons.calendar_today, 'End',
-                end != null ? dtFormat.format(end.toLocal()) : ''),
+            _infoRow(
+              Icons.calendar_today_outlined,
+              'Start',
+              start != null ? dtFormat.format(start.toLocal()) : '',
+            ),
+            _infoRow(
+              Icons.calendar_today,
+              'End',
+              end != null ? dtFormat.format(end.toLocal()) : '',
+            ),
             const Divider(height: 20),
 
             // 🏢 Organizer & Company
@@ -153,12 +209,62 @@ class _MeetingDetailsScreenState extends State<MeetingDetailsScreen> {
             const Divider(height: 20),
 
             // 📍 Location
-            _infoRow(Icons.place_outlined, 'Location',
-                meeting['location']?.toString() ?? ''),
-            _infoRow(Icons.link, 'Meeting Link',
-                meeting['meetingLink']?.toString() ?? ''),
-            _infoRow(Icons.notes_outlined, 'Notes',
-                meeting['notes']?.toString() ?? ''),
+            _infoRow(
+              Icons.place_outlined,
+              'Location',
+              meeting['location']?.toString() ?? '',
+            ),
+            _infoRow(
+              Icons.link,
+              'Meeting Link',
+              meeting['meetingLink']?.toString() ?? '',
+            ),
+
+            // ✅ Meeting Password Card (Optional)
+            if ((meeting['meetingPassword'] ?? '').toString().isNotEmpty)
+              Card(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                margin: const EdgeInsets.only(top: 12, bottom: 12),
+                child: ListTile(
+                  leading: const Icon(Icons.lock_outline, color: Colors.brown),
+                  title: const Text(
+                    'Meeting Password',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.brown,
+                    ),
+                  ),
+                  subtitle: Text(
+                    meeting['meetingPassword'],
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.copy, color: Colors.brown),
+                    onPressed: () async {
+                      await Clipboard.setData(
+                        ClipboardData(text: meeting['meetingPassword']),
+                      );
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Password copied to clipboard'),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+
+            _infoRow(
+              Icons.notes_outlined,
+              'Notes',
+              meeting['notes']?.toString() ?? '',
+            ),
           ],
         ),
       ),
@@ -189,10 +295,7 @@ class _MeetingDetailsScreenState extends State<MeetingDetailsScreen> {
                 const SizedBox(height: 4),
                 Text(
                   value,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    color: Colors.black87,
-                  ),
+                  style: const TextStyle(fontSize: 15, color: Colors.black87),
                 ),
               ],
             ),

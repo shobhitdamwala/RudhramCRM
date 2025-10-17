@@ -13,7 +13,8 @@ const UserSchema = new mongoose.Schema({
     passwordHash: { type: String, required: true, select: false },
     avatarUrl: { type: String },
     isActive: { type: Boolean, default: true },
-    lastLoginAt: Date
+    lastLoginAt: Date,
+    deviceTokens: { type: [String], default: [] },
 }, { timestamps: true });
 
 UserSchema.methods.verifyPassword = function(pw) {

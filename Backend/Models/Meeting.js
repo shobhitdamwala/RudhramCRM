@@ -4,7 +4,7 @@ const MeetingSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
     agenda: String,
-   
+
     subCompany: { type: mongoose.Schema.Types.ObjectId, ref: "SubCompany" },
     organizer: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 
@@ -18,6 +18,7 @@ const MeetingSchema = new mongoose.Schema(
 
     location: String,
     meetingLink: String,
+    meetingPassword: { type: String }, // ✅ NEW OPTIONAL FIELD
     notes: String,
 
     meetingWithType: {
@@ -25,6 +26,10 @@ const MeetingSchema = new mongoose.Schema(
       enum: ["lead", "client"],
       required: true,
     },
+    // models/Meeting.js
+startNotified: { type: Boolean, default: false },
+createdNotified: { type: Boolean, default: false }, // optional: notify on creation
+
   },
   { timestamps: true }
 );
