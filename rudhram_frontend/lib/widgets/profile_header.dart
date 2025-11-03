@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../utils/constants.dart';
+import '../screens/profile_screen.dart'; // <-- Import your Profile Screen here
 
 class ProfileHeader extends StatelessWidget {
   final String? avatarUrl;
@@ -26,13 +27,25 @@ class ProfileHeader extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
+          // 🔹 Avatar + Name + Role
           Row(
             children: [
-              CircleAvatar(
-                radius: 28,
-                backgroundImage: (avatarUrl != null && avatarUrl!.isNotEmpty)
-                    ? NetworkImage(avatarUrl!)
-                    : const AssetImage('assets/user.jpg') as ImageProvider,
+              // 👇 Wrap avatar with GestureDetector to handle click
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ProfileScreen(),
+                    ),
+                  );
+                },
+                child: CircleAvatar(
+                  radius: 28,
+                  backgroundImage: (avatarUrl != null && avatarUrl!.isNotEmpty)
+                      ? NetworkImage(avatarUrl!)
+                      : const AssetImage('assets/user.jpg') as ImageProvider,
+                ),
               ),
               const SizedBox(width: 10),
               Column(
@@ -55,9 +68,9 @@ class ProfileHeader extends StatelessWidget {
             ],
           ),
 
-          // 🔹 Right side icons
+          // 🔹 Right side icons (Back + Notification)
           Row(
-            children: [               
+            children: [
               if (showBackButton)
                 IconButton(
                   icon: const Icon(
@@ -72,7 +85,15 @@ class ProfileHeader extends StatelessWidget {
                   color: Colors.brown,
                   size: 26,
                 ),
-                onPressed: () {},
+                onPressed: onNotification ??
+                    () {
+                      // Default behavior
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('No new notifications'),
+                        ),
+                      );
+                    },
               ),
             ],
           ),

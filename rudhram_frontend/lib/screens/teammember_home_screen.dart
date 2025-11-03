@@ -20,20 +20,22 @@ class TeamMemberHomeScreen extends StatefulWidget {
 
 class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
   Map<String, dynamic>? userData;
-  List<dynamic> assignedTasks = [];
+  List<dynamic> allAssignedTasks = [];
+  List<dynamic> assignedTasks = []; // filtered for current user
   List<dynamic> recentTasks = [];
   List<dynamic> deadlineTasks = [];
+  List<Map<String, dynamic>> teamMembers = [];
   bool isLoading = true;
   bool isUpdatingTask = false;
   String? updatingTaskId;
 
-  // Task status colors
   final Map<String, Color> statusColors = {
     'not_started': Colors.grey,
     'in_progress': Colors.orange,
     'review': Colors.blue,
     'done': Colors.green,
     'blocked': Colors.red,
+    'open': Colors.orange,
   };
 
   final Map<String, Color> priorityColors = {
@@ -48,8 +50,26 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     fetchAllData();
   }
 
+  String formatUserRole(String? role) {
+    if (role == null) return '';
+    switch (role.toUpperCase()) {
+      case 'SUPER_ADMIN':
+        return 'Super Admin';
+      case 'ADMIN':
+        return 'Admin';
+      case 'TEAM_MEMBER':
+        return 'Team Member';
+      case 'CLIENT':
+        return 'Client';
+      default:
+        return role;
+    }
+  }
+
   Future<void> fetchAllData() async {
     try {
+      setState(() => isLoading = true);
+
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
 
@@ -60,15 +80,20 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
           message: "Please log in again.",
           type: ContentType.warning,
         );
+        setState(() => isLoading = false);
         return;
       }
 
+      // fetch user first
+      await fetchUser(token);
+
+      // fetch team members and tasks in parallel (teamMembers needed to render names)
       await Future.wait([
-        fetchUser(token),
+        fetchTeamMembers(token),
         fetchAssignedTasks(token),
         fetchRecentTasks(token),
       ]);
-      
+
       _checkDeadlines();
     } catch (e) {
       SnackbarHelper.show(
@@ -82,44 +107,6 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     }
   }
 
-  void _checkDeadlines() {
-    final now = DateTime.now();
-    final upcomingDeadlines = assignedTasks.where((task) {
-      if (task['deadline'] == null) return false;
-      final deadline = DateTime.parse(task['deadline']).toLocal();
-      final difference = deadline.difference(now);
-      return difference.inDays <= 3 && difference.inDays >= 0;
-    }).toList();
-
-    setState(() {
-      deadlineTasks = upcomingDeadlines;
-    });
-
-    if (deadlineTasks.isNotEmpty) {
-      _showDeadlineNotification();
-    }
-  }
-
-  void _showDeadlineNotification() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (deadlineTasks.length == 1) {
-        SnackbarHelper.show(
-          context,
-          title: "⏰ Deadline Approaching",
-          message: "${deadlineTasks.first['title']} is due soon!",
-          type: ContentType.warning,
-        );
-      } else if (deadlineTasks.length > 1) {
-        SnackbarHelper.show(
-          context,
-          title: "⏰ Multiple Deadlines",
-          message: "You have ${deadlineTasks.length} tasks due soon!",
-          type: ContentType.warning,
-        );
-      }
-    });
-  }
-
   Future<void> fetchUser(String token) async {
     try {
       final res = await http.get(
@@ -129,7 +116,8 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final u = Map<String, dynamic>.from(data['user'] ?? {});
-        if (u['avatarUrl'] != null && u['avatarUrl'].toString().startsWith('/')) {
+        if (u['avatarUrl'] != null &&
+            u['avatarUrl'].toString().startsWith('/')) {
           u['avatarUrl'] = _absUrl(u['avatarUrl']);
         }
         if (mounted) setState(() => userData = u);
@@ -147,30 +135,76 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     }
   }
 
+  Future<void> fetchTeamMembers(String token) async {
+    try {
+      final res = await http.get(
+        Uri.parse("${ApiConfig.baseUrl}/user/team-members"),
+        headers: {"Authorization": "Bearer $token"},
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final raw = List<dynamic>.from(data['teamMembers'] ?? []);
+        teamMembers = raw
+            .map<Map<String, dynamic>>(
+              (m) => Map<String, dynamic>.from(m as Map),
+            )
+            .toList();
+        if (mounted) setState(() {});
+      }
+    } catch (e) {
+      // silently fail; names will fallback to ids
+    }
+  }
+
   Future<void> fetchAssignedTasks(String token) async {
     try {
-      print("🔄 Fetching tasks from: ${ApiConfig.baseUrl}/task/mytasks");
-      
       final response = await http.get(
         Uri.parse("${ApiConfig.baseUrl}/task/mytasks"),
         headers: {"Authorization": "Bearer $token"},
       );
 
-      print("📡 Response status: ${response.statusCode}");
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        print("✅ Tasks fetched successfully: ${data['data']?.length ?? 0} tasks");
-        
-        setState(() {
-          assignedTasks = List<dynamic>.from(data['data'] ?? []);
-        });
+        allAssignedTasks = List<dynamic>.from(data['data'] ?? []);
+
+        final myId = (userData?['_id'] ?? userData?['id'])?.toString();
+
+        if (myId != null && myId.isNotEmpty) {
+          assignedTasks = allAssignedTasks.where((task) {
+            // check top-level assignedTo
+            final assignedTo = List<dynamic>.from(task['assignedTo'] ?? []);
+            for (var a in assignedTo) {
+              if (a == null) continue;
+              if (a is String && a == myId) return true;
+              if (a is Map &&
+                  ((a['_id']?.toString() ?? a['id']?.toString()) == myId))
+                return true;
+            }
+            // check per-service assignedTeamMembers
+            final chosen = List<dynamic>.from(task['chosenServices'] ?? []);
+            for (var s in chosen) {
+              final at = List<dynamic>.from(
+                s['assignedTeamMembers'] ?? s['assignedTo'] ?? [],
+              );
+              for (var a in at) {
+                if (a == null) continue;
+                if (a is String && a == myId) return true;
+                if (a is Map &&
+                    ((a['_id']?.toString() ?? a['id']?.toString()) == myId))
+                  return true;
+              }
+            }
+            return false;
+          }).toList();
+        } else {
+          assignedTasks = List<dynamic>.from(allAssignedTasks);
+        }
+
+        if (mounted) setState(() {});
       } else {
-        print("❌ Failed to fetch tasks: ${response.statusCode}");
         await _showErrorSnack(response.body, fallback: "Failed to fetch tasks");
       }
     } catch (e) {
-      print("💥 Error fetching tasks: $e");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -190,16 +224,95 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        setState(() {
-          recentTasks = List<dynamic>.from(data['data'] ?? []).take(5).toList();
-        });
+        final raw = List<dynamic>.from(data['data'] ?? []);
+        final myId = (userData?['_id'] ?? userData?['id'])?.toString();
+        if (myId != null && myId.isNotEmpty) {
+          recentTasks = raw
+              .where((task) {
+                final assignedTo = List<dynamic>.from(task['assignedTo'] ?? []);
+                for (var a in assignedTo) {
+                  if (a == null) continue;
+                  if (a is String && a == myId) return true;
+                  if (a is Map &&
+                      ((a['_id']?.toString() ?? a['id']?.toString()) == myId))
+                    return true;
+                }
+                final chosen = List<dynamic>.from(task['chosenServices'] ?? []);
+                for (var s in chosen) {
+                  final at = List<dynamic>.from(
+                    s['assignedTeamMembers'] ?? s['assignedTo'] ?? [],
+                  );
+                  for (var a in at) {
+                    if (a == null) continue;
+                    if (a is String && a == myId) return true;
+                    if (a is Map &&
+                        ((a['_id']?.toString() ?? a['id']?.toString()) == myId))
+                      return true;
+                  }
+                }
+                return false;
+              })
+              .take(5)
+              .toList();
+        } else {
+          recentTasks = raw.take(5).toList();
+        }
+
+        if (mounted) setState(() {});
       }
     } catch (e) {
-      // Silently fail for recent tasks
+      // ignore
     }
   }
 
-  Future<void> updateTaskStatus(String taskId, String newStatus, {String? taskTitle}) async {
+  void _checkDeadlines() {
+    final now = DateTime.now();
+    final upcomingDeadlines = assignedTasks.where((task) {
+      if (task['deadline'] == null) return false;
+      try {
+        final deadline = DateTime.parse(task['deadline']).toLocal();
+        final difference = deadline.difference(now);
+        return difference.inDays <= 3 && difference.inDays >= 0;
+      } catch (_) {
+        return false;
+      }
+    }).toList();
+
+    setState(() {
+      deadlineTasks = upcomingDeadlines;
+    });
+
+    if (deadlineTasks.isNotEmpty) {
+      _showDeadlineNotification();
+    }
+  }
+
+  void _showDeadlineNotification() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (deadlineTasks.length == 1) {
+        SnackbarHelper.show(
+          context,
+          title: "⏰ Deadline Approaching",
+          message: "\"${deadlineTasks.first['title']}\" is due soon!",
+          type: ContentType.warning,
+        );
+      } else if (deadlineTasks.length > 1) {
+        SnackbarHelper.show(
+          context,
+          title: "⏰ Multiple Deadlines",
+          message: "You have ${deadlineTasks.length} tasks due soon!",
+          type: ContentType.warning,
+        );
+      }
+    });
+  }
+
+  Future<void> updateTaskStatus(
+    String taskId,
+    String newStatus, {
+    String? taskTitle,
+  }) async {
     setState(() {
       isUpdatingTask = true;
       updatingTaskId = taskId;
@@ -210,7 +323,7 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
       final token = prefs.getString('auth_token');
 
       final response = await http.put(
-        Uri.parse("${ApiConfig.baseUrl}/task/$taskId"),
+        Uri.parse("${ApiConfig.baseUrl}/task/$taskId/updatestatus"),
         headers: {
           "Authorization": "Bearer $token",
           "Content-Type": "application/json",
@@ -222,13 +335,12 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
         SnackbarHelper.show(
           context,
           title: "✅ Status Updated",
-          message: "${taskTitle ?? 'Task'} status changed to ${newStatus.replaceAll('_', ' ')}",
+          message:
+              "${taskTitle ?? 'Task'} status changed to ${newStatus.replaceAll('_', ' ')}",
           type: ContentType.success,
         );
 
-        if (token != null) {
-          await fetchAssignedTasks(token);
-        }
+        if (token != null) await fetchAssignedTasks(token);
       } else {
         await _showErrorSnack(
           response.body,
@@ -250,7 +362,11 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     }
   }
 
-  Future<void> updateTaskProgress(String taskId, int progress, {String? taskTitle}) async {
+  Future<void> updateTaskProgress(
+    String taskId,
+    int progress, {
+    String? taskTitle,
+  }) async {
     setState(() {
       isUpdatingTask = true;
       updatingTaskId = taskId;
@@ -277,9 +393,7 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
           type: ContentType.success,
         );
 
-        if (token != null) {
-          await fetchAssignedTasks(token);
-        }
+        if (token != null) await fetchAssignedTasks(token);
       } else {
         await _showErrorSnack(
           response.body,
@@ -316,11 +430,12 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
   }) async {
     try {
       final b = body is String ? jsonDecode(body) : body;
-      final msg = (b?['message'] ?? b?['error'] ?? b?['msg'] ?? fallback).toString();
+      final msg = (b?['message'] ?? b?['error'] ?? b?['msg'] ?? fallback)
+          .toString();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.red),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -329,7 +444,31 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     }
   }
 
+  // get readable member name from id/object using teamMembers list or fallback to id
+  String _getMemberName(dynamic a) {
+    try {
+      if (a == null) return '';
+      if (a is Map) {
+        final id = (a['_id'] ?? a['id'])?.toString();
+        final name = a['fullName'] ?? a['name'] ?? a['email'] ?? id;
+        return name?.toString() ?? id ?? '';
+      }
+      final sid = a.toString();
+      final found = teamMembers.firstWhere(
+        (m) => (m['_id']?.toString() == sid || m['id']?.toString() == sid),
+        orElse: () => {},
+      );
+      if (found.isNotEmpty) {
+        return (found['fullName'] ?? found['name'] ?? sid).toString();
+      }
+      return sid;
+    } catch (_) {
+      return a.toString();
+    }
+  }
+
   void _showTaskDetails(dynamic task) {
+    final myId = (userData?['_id'] ?? userData?['id'])?.toString();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -341,10 +480,30 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
           minChildSize: 0.5,
           maxChildSize: 0.95,
           builder: (context, scrollController) {
+            final chosen = List<dynamic>.from(task['chosenServices'] ?? []);
+            final visibleServices = (myId != null && myId.isNotEmpty)
+                ? chosen.where((s) {
+                    final at = List<dynamic>.from(
+                      s['assignedTeamMembers'] ?? s['assignedTo'] ?? [],
+                    );
+                    for (var a in at) {
+                      if (a == null) continue;
+                      if (a is String && a == myId) return true;
+                      if (a is Map &&
+                          ((a['_id']?.toString() ?? a['id']?.toString()) ==
+                              myId))
+                        return true;
+                    }
+                    return false;
+                  }).toList()
+                : chosen;
+
             return Container(
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
+                ),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.15),
@@ -355,17 +514,25 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
               ),
               child: Column(
                 children: [
-                  // Header
+                  // header gradient using AppColors.primaryColor
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-                    decoration: const BoxDecoration(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 16,
+                      horizontal: 20,
+                    ),
+                    decoration: BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [Color(0xFF8B5E3C), Color(0xFFD2B48C)],
+                        colors: [
+                          AppColors.primaryColor,
+                          AppColors.primaryColor.withOpacity(0.85),
+                        ],
                         begin: Alignment.centerLeft,
                         end: Alignment.centerRight,
                       ),
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(24),
+                      ),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -388,22 +555,19 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
                               Text(
                                 'Task Details',
                                 style: TextStyle(
-                                  color: Colors.white.withOpacity(0.8),
+                                  color: Colors.white.withOpacity(0.9),
                                   fontSize: 12,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        GestureDetector(
-                          onTap: () => Navigator.pop(context),
-                          child: const Icon(Icons.close_rounded, color: Colors.white),
-                        ),
+                        // ❗ Removed main task status chip here
+                        // (no chip on header now)
                       ],
                     ),
                   ),
 
-                  // Content
                   Expanded(
                     child: SingleChildScrollView(
                       controller: scrollController,
@@ -411,41 +575,35 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Status and Priority
+                          // Top row: show only PRIORITY chip (no main task status)
                           Row(
                             children: [
-                              _buildStatusChip(task['status'] ?? 'not_started'),
-                              const SizedBox(width: 8),
                               _buildPriorityChip(task['priority'] ?? 'medium'),
                             ],
                           ),
                           const SizedBox(height: 16),
 
-                          // Client Information
+                          // Minimal client information
                           if (task['client'] != null)
-                            _buildClientInfoSection(task['client']),
+                            _buildClientInfoSectionMinimal(task['client']),
 
-                          // Service Information
-                          if (task['client']?['meta']?['chosenServices'] != null)
-                            _buildServicesSection(task['client']?['meta']?['chosenServices']),
-
-                          // Team Information
-                          _buildTeamSection(task),
+                          // Services assigned to this user (show names)
+                          if (visibleServices.isNotEmpty)
+                            _buildServicesSectionFiltered(visibleServices),
 
                           // Description
-                          if (task['description'] != null && task['description'].isNotEmpty)
+                          if (task['description'] != null &&
+                              task['description'].toString().trim().isNotEmpty)
                             _buildDescriptionSection(task['description']),
 
-                          // Deadline
+                          // Deadline indicator only (no raw datetime)
                           if (task['deadline'] != null)
-                            _buildDeadlineSection(task['deadline']),
+                            _buildDeadlineIndicator(task['deadline']),
 
-                          // Progress Section
+                          const SizedBox(height: 12),
+                          // Progress box already shows the user's status nicely
                           _buildProgressSection(task),
-
                           const SizedBox(height: 20),
-
-                          // Action Buttons
                           _buildActionButtons(task),
                         ],
                       ),
@@ -460,15 +618,22 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     );
   }
 
-  Widget _buildClientInfoSection(Map<String, dynamic> client) {
+  Widget _buildClientInfoSectionMinimal(dynamic client) {
+    String name = '';
+    try {
+      if (client is String)
+        name = client;
+      else if (client is Map)
+        name = client['name'] ?? client['businessName'] ?? client['_id'] ?? '';
+    } catch (_) {}
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          "Client Information",
+          "Client",
           style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
             color: Colors.brown,
           ),
         ),
@@ -480,31 +645,25 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: Colors.grey[300]!),
           ),
-          child: Column(
+          child: Row(
             children: [
-              _buildDetailRow("Name", client['name'] ?? 'N/A', Icons.person),
-              if (client['businessName'] != null)
-                _buildDetailRow("Business", client['businessName']!, Icons.business),
-              if (client['email'] != null)
-                _buildDetailRow("Email", client['email']!, Icons.email),
-              if (client['phone'] != null)
-                _buildDetailRow("Phone", client['phone']!, Icons.phone),
-              if (client['meta']?['businessCategory'] != null)
-                _buildDetailRow("Category", client['meta']?['businessCategory']!, Icons.category),
+              const Icon(Icons.person, color: Colors.brown),
+              const SizedBox(width: 8),
+              Expanded(child: Text(name, style: const TextStyle(fontSize: 14))),
             ],
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
       ],
     );
   }
 
-  Widget _buildServicesSection(List<dynamic> chosenServices) {
+  Widget _buildServicesSectionFiltered(List<dynamic> chosenServices) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          "Chosen Services",
+          "Your Assigned Services",
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
@@ -522,14 +681,24 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: chosenServices.map((service) {
+              final offerings = List<dynamic>.from(
+                service['selectedOfferings'] ?? service['offerings'] ?? [],
+              );
+              final assigned = List<dynamic>.from(
+                service['assignedTeamMembers'] ?? service['assignedTo'] ?? [],
+              );
               return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.design_services, size: 16, color: Colors.brown),
+                        const Icon(
+                          Icons.design_services,
+                          size: 16,
+                          color: Colors.brown,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -541,23 +710,72 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
                             ),
                           ),
                         ),
+                        if (service['subCompanyName'] != null &&
+                            service['subCompanyName'].toString().isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[100],
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              service['subCompanyName'].toString(),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
                       ],
                     ),
-                    if (service['offerings'] != null && service['offerings'].isNotEmpty)
+                    if (offerings.isNotEmpty)
                       Padding(
-                        padding: const EdgeInsets.only(left: 24, top: 4),
+                        padding: const EdgeInsets.only(left: 24, top: 6),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: (service['offerings'] as List).map((offering) {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 2),
-                              child: Text(
-                                '• $offering',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey,
+                          children: offerings
+                              .map<Widget>(
+                                (o) => Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 2,
+                                  ),
+                                  child: Text(
+                                    '• ${o.toString()}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
                                 ),
+                              )
+                              .toList(),
+                        ),
+                      ),
+                    if (assigned.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 24, top: 8),
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: assigned.map<Widget>((a) {
+                            final name = _getMemberName(a);
+                            final amIMe =
+                                ((userData?['_id']?.toString() ??
+                                    userData?['id']?.toString()) ==
+                                (a is String
+                                    ? a
+                                    : (a is Map
+                                          ? (a['_id']?.toString() ??
+                                                a['id']?.toString())
+                                          : a.toString())));
+                            return Chip(
+                              label: Text(
+                                amIMe ? 'You' : name,
+                                style: const TextStyle(fontSize: 12),
                               ),
+                              backgroundColor: amIMe
+                                  ? AppColors.primaryColor.withOpacity(0.12)
+                                  : Colors.grey[100],
                             );
                           }).toList(),
                         ),
@@ -568,81 +786,7 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
             }).toList(),
           ),
         ),
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-
-  Widget _buildTeamSection(dynamic task) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "Team Information",
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: Colors.brown,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.grey[50],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey[300]!),
-          ),
-          child: Column(
-            children: [
-              if (task['assignedTo'] != null && task['assignedTo'].isNotEmpty)
-                _buildTeamMembers(task['assignedTo']),
-              if (task['createdBy'] != null)
-                _buildDetailRow("Created By", task['createdBy']['fullName'] ?? 'Unknown', Icons.person_add),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-
-  Widget _buildTeamMembers(List<dynamic> assignedTo) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Row(
-          children: [
-            Icon(Icons.group, size: 16, color: Colors.brown),
-            SizedBox(width: 8),
-            Text(
-              "Assigned Team Members:",
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Colors.brown,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        ...assignedTo.map((member) {
-          return Padding(
-            padding: const EdgeInsets.only(left: 24, bottom: 4),
-            child: Row(
-              children: [
-                const Icon(Icons.person_outline, size: 14, color: Colors.grey),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '${member['fullName']} (${member['email']})',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }).toList(),
+        const SizedBox(height: 12),
       ],
     );
   }
@@ -671,72 +815,40 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
             style: const TextStyle(fontSize: 14, color: Colors.black87),
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
       ],
     );
   }
 
-  Widget _buildDeadlineSection(String deadline) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "Deadline",
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: Colors.brown,
+  Widget _buildDeadlineIndicator(String deadline) {
+    Color c = _getDeadlineColor(deadline);
+    String msg = _getDeadlineMessage(deadline);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: c.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: c),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.calendar_today, size: 16, color: c),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              msg,
+              style: TextStyle(color: c, fontWeight: FontWeight.w600),
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: _getDeadlineColor(deadline).withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: _getDeadlineColor(deadline)),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.calendar_today, size: 16, color: _getDeadlineColor(deadline)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      DateFormat('EEEE, MMMM dd, yyyy - hh:mm a').format(
-                        DateTime.parse(deadline).toLocal(),
-                      ),
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: _getDeadlineColor(deadline),
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _getDeadlineMessage(deadline),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _getDeadlineColor(deadline),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _buildProgressSection(dynamic task) {
-    final progress = task['progress'] ?? 0;
+    final progress = (task['progress'] ?? 0) as int;
     final userStatus = task['userStatus'] ?? 'not_started';
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -759,12 +871,13 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
           ),
           child: Column(
             children: [
-              // Progress Bar
               LinearProgressIndicator(
                 value: progress / 100,
                 backgroundColor: Colors.grey[300],
-                valueColor: AlwaysStoppedAnimation<Color>(_getProgressColor(progress)),
-                borderRadius: BorderRadius.circular(4),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  _getProgressColor(progress),
+                ),
+                minHeight: 8,
               ),
               const SizedBox(height: 8),
               Row(
@@ -772,7 +885,10 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
                 children: [
                   Text(
                     "$progress% Complete",
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   Text(
                     "${100 - progress}% Remaining",
@@ -780,27 +896,16 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              // User Status
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: statusColors[userStatus]?.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: statusColors[userStatus] ?? Colors.grey),
-                ),
-                child: Text(
-                  "Your Status: ${userStatus.replaceAll('_', ' ').toUpperCase()}",
-                  style: TextStyle(
-                    color: statusColors[userStatus] ?? Colors.grey,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+              const SizedBox(height: 10),
+              // 👇 User's status chip (from TaskAssignment)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _buildStatusChip(userStatus),
               ),
             ],
           ),
         ),
+        const SizedBox(height: 12),
       ],
     );
   }
@@ -820,13 +925,18 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
               backgroundColor: AppColors.primaryColor,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
             icon: isUpdatingTask && updatingTaskId == task['_id']
                 ? const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
                   )
                 : const Icon(Icons.update, size: 18),
             label: isUpdatingTask && updatingTaskId == task['_id']
@@ -847,7 +957,9 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
               foregroundColor: AppColors.primaryColor,
               side: const BorderSide(color: AppColors.primaryColor),
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
             icon: isUpdatingTask && updatingTaskId == task['_id']
                 ? const SizedBox(
@@ -865,46 +977,106 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     );
   }
 
-  Widget _buildDetailRow(String label, String value, IconData icon) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: Colors.brown),
-          const SizedBox(width: 8),
-          Text(
-            '$label: ',
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.brown),
-          ),
-          Expanded(
-            child: Text(value, style: const TextStyle(fontSize: 14, color: Colors.black87)),
-          ),
-        ],
+  void _showStatusUpdateDialog(dynamic task) {
+    final List<String> statusOptions = [
+      'not_started',
+      'in_progress',
+      'review',
+      'done',
+      'blocked',
+    ];
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Update Task Status"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: statusOptions.map((status) {
+            return ListTile(
+              leading: Icon(Icons.circle, color: statusColors[status]),
+              title: Text(status.replaceAll('_', ' ').toUpperCase()),
+              onTap: () {
+                Navigator.pop(context);
+                updateTaskStatus(task['_id'], status, taskTitle: task['title']);
+              },
+            );
+          }).toList(),
+        ),
       ),
     );
   }
 
-  Color _getDeadlineColor(String deadline) {
-    final now = DateTime.now();
-    final taskDeadline = DateTime.parse(deadline).toLocal();
-    final difference = taskDeadline.difference(now);
-    
-    if (difference.inDays < 0) return Colors.red;
-    if (difference.inDays == 0) return Colors.orange;
-    if (difference.inDays <= 2) return Colors.orange;
-    if (difference.inDays <= 7) return Colors.blue;
-    return Colors.green;
-  }
-
-  String _getDeadlineMessage(String deadline) {
-    final now = DateTime.now();
-    final taskDeadline = DateTime.parse(deadline).toLocal();
-    final difference = taskDeadline.difference(now);
-    
-    if (difference.inDays < 0) return 'Overdue by ${difference.inDays.abs()} days';
-    if (difference.inDays == 0) return 'Due today';
-    if (difference.inDays == 1) return 'Due tomorrow';
-    return 'Due in ${difference.inDays} days';
+  void _showProgressUpdateDialog(dynamic task) {
+    int currentProgress = (task['progress'] ?? 0) as int;
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text("Update Progress"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  "$currentProgress%",
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Slider(
+                  value: currentProgress.toDouble(),
+                  min: 0,
+                  max: 100,
+                  divisions: 20,
+                  onChanged: (value) =>
+                      setState(() => currentProgress = value.round()),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [0, 25, 50, 75, 100].map((value) {
+                    return Text(
+                      "$value%",
+                      style: TextStyle(
+                        fontWeight: value == currentProgress
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: value == currentProgress
+                            ? AppColors.primaryColor
+                            : Colors.grey,
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Cancel"),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  updateTaskProgress(
+                    task['_id'],
+                    currentProgress,
+                    taskTitle: task['title'],
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primaryColor,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text("Update"),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   Widget _buildStatusChip(String status) {
@@ -951,146 +1123,45 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     return Colors.green;
   }
 
-  void _showStatusUpdateDialog(dynamic task) {
-    final List<String> statusOptions = ['not_started', 'in_progress', 'review', 'done', 'blocked'];
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Update Task Status"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: statusOptions.map((status) {
-            return ListTile(
-              leading: Icon(Icons.circle, color: statusColors[status]),
-              title: Text(status.replaceAll('_', ' ').toUpperCase()),
-              onTap: () {
-                Navigator.pop(context);
-                updateTaskStatus(task['_id'], status, taskTitle: task['title']);
-              },
-            );
-          }).toList(),
-        ),
-      ),
-    );
+  Color _getDeadlineColor(String deadline) {
+    try {
+      final now = DateTime.now();
+      final taskDeadline = DateTime.parse(deadline).toLocal();
+      final difference = taskDeadline.difference(now);
+      if (difference.inDays < 0) return Colors.red;
+      if (difference.inDays == 0) return Colors.orange;
+      if (difference.inDays <= 2) return Colors.orange;
+      if (difference.inDays <= 7) return Colors.blue;
+      return Colors.green;
+    } catch (_) {
+      return Colors.grey;
+    }
   }
 
-  void _showProgressUpdateDialog(dynamic task) {
-    int currentProgress = task['progress'] ?? 0;
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) {
-          return AlertDialog(
-            title: const Text("Update Progress"),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text("$currentProgress%", style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 16),
-                Slider(
-                  value: currentProgress.toDouble(),
-                  min: 0,
-                  max: 100,
-                  divisions: 20,
-                  onChanged: (value) => setState(() => currentProgress = value.round()),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [0, 25, 50, 75, 100].map((value) {
-                    return Text(
-                      "$value%",
-                      style: TextStyle(
-                        fontWeight: value == currentProgress ? FontWeight.bold : FontWeight.normal,
-                        color: value == currentProgress ? AppColors.primaryColor : Colors.grey,
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  updateTaskProgress(task['_id'], currentProgress, taskTitle: task['title']);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primaryColor,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text("Update"),
-              ),
-            ],
-          );
-        },
-      ),
-    );
+  String _getDeadlineMessage(String deadline) {
+    try {
+      final now = DateTime.now();
+      final taskDeadline = DateTime.parse(deadline).toLocal();
+      final difference = taskDeadline.difference(now);
+      if (difference.inDays < 0)
+        return 'Overdue by ${difference.inDays.abs()} days';
+      if (difference.inDays == 0) return 'Due today';
+      if (difference.inDays == 1) return 'Due tomorrow';
+      return 'Due in ${difference.inDays} days';
+    } catch (_) {
+      return 'Deadline information';
+    }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: BackgroundContainer(
-        child: SafeArea(
-          child: isLoading
-              ? const Center(child: CircularProgressIndicator(color: Colors.brown))
-              : Column(
-                  children: [
-                    Expanded(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Profile Header
-                            ProfileHeader(
-                              avatarUrl: userData?['avatarUrl'],
-                              fullName: userData?['fullName'],
-                              role: userData?['role'] ?? 'Team Member',
-                              onNotification: () => print("🔔 Notification tapped"),
-                            ),
-
-                            const SizedBox(height: 20),
-
-                            // Deadline Notifications
-                            if (deadlineTasks.isNotEmpty) _buildDeadlineNotification(),
-
-                            // Welcome Card
-                            _buildWelcomeCard(),
-
-                            const SizedBox(height: 20),
-
-                            // Assigned Tasks Section
-                            _buildTasksSection(),
-
-                            const SizedBox(height: 20),
-
-                            // Recent Activity
-                            if (recentTasks.isNotEmpty) _buildRecentActivitySection(),
-
-                            const SizedBox(height: 20),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    // Bottom Navigation
-                    CustomBottomNavBar(
-                      currentIndex: 0,
-                      onTap: (index) {
-                        if (index == 1) print("Navigate to profile");
-                      },
-                      userRole: userData?['role'] ?? '',
-                    ),
-                  ],
-                ),
-        ),
-      ),
-    );
+  bool _isApproachingDeadline(dynamic deadline) {
+    try {
+      final now = DateTime.now();
+      final d = DateTime.parse(deadline).toLocal();
+      final diff = d.difference(now);
+      return diff.inDays <= 3;
+    } catch (_) {
+      return false;
+    }
   }
 
   Widget _buildDeadlineNotification() {
@@ -1101,21 +1172,40 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
           width: double.infinity,
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(colors: [Colors.orange, Colors.red]),
+            gradient: LinearGradient(colors: [Colors.orange, Colors.red]),
             borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: Colors.orange.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))],
+            boxShadow: [
+              BoxShadow(
+                color: Colors.orange.withOpacity(0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
           child: Row(
             children: [
-              const Icon(Icons.notifications_active, color: Colors.white, size: 24),
+              const Icon(
+                Icons.notifications_active,
+                color: Colors.white,
+                size: 24,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text("Deadline Alert!", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                    Text("You have ${deadlineTasks.length} task${deadlineTasks.length > 1 ? 's' : ''} due soon", 
-                         style: const TextStyle(color: Colors.white, fontSize: 14)),
+                    const Text(
+                      "Deadline Alert!",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      "You have ${deadlineTasks.length} task${deadlineTasks.length > 1 ? 's' : ''} due soon",
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                    ),
                   ],
                 ),
               ),
@@ -1131,69 +1221,28 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     );
   }
 
-  Widget _buildWelcomeCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(colors: [Color(0xFF8B5E3C), Color(0xFFD2B48C)]),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 8, offset: const Offset(0, 4))],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("Welcome back, ${userData?['fullName']?.split(' ').first ?? 'Team Member'}!", 
-               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-          const SizedBox(height: 8),
-          Text("You have ${assignedTasks.length} assigned tasks", 
-               style: const TextStyle(fontSize: 14, color: Colors.white70)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTasksSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text("My Tasks", style: TextStyle(color: Colors.brown, fontWeight: FontWeight.bold, fontSize: 18)),
-            Text("${assignedTasks.length} tasks", style: const TextStyle(color: Colors.grey, fontSize: 14)),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (assignedTasks.isEmpty) _buildEmptyState() else ...assignedTasks.map((task) => _buildTaskCard(task)),
-      ],
-    );
-  }
-
-  Widget _buildRecentActivitySection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text("Recent Activity", style: TextStyle(color: Colors.brown, fontWeight: FontWeight.bold, fontSize: 16)),
-        const SizedBox(height: 12),
-        ...recentTasks.map((task) => _buildRecentTaskItem(task)),
-      ],
-    );
-  }
-
   Widget _buildTaskCard(dynamic task) {
-    final deadline = task['deadline'] != null ? DateTime.parse(task['deadline']).toLocal() : null;
-    final progress = task['progress'] ?? 0;
-    final hasApproachingDeadline = deadlineTasks.any((t) => t['_id'] == task['_id']);
+    final progress = (task['progress'] ?? 0) as int;
+    final hasApproachingDeadline =
+        task['deadline'] != null && _isApproachingDeadline(task['deadline']);
     final isThisTaskUpdating = isUpdatingTask && updatingTaskId == task['_id'];
+    final userStatus = task['userStatus'] ?? 'not_started';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 6, offset: const Offset(0, 2))],
-        border: hasApproachingDeadline ? Border.all(color: Colors.orange, width: 2) : null,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+        border: hasApproachingDeadline
+            ? Border.all(color: Colors.orange, width: 2)
+            : null,
       ),
       child: Material(
         color: Colors.transparent,
@@ -1201,7 +1250,7 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
           onTap: isThisTaskUpdating ? null : () => _showTaskDetails(task),
           borderRadius: BorderRadius.circular(12),
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(14),
             child: Stack(
               children: [
                 if (isThisTaskUpdating)
@@ -1209,13 +1258,16 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
                     child: Container(
                       color: Colors.white.withOpacity(0.8),
                       child: const Center(
-                        child: CircularProgressIndicator(color: AppColors.primaryColor),
+                        child: CircularProgressIndicator(
+                          color: AppColors.primaryColor,
+                        ),
                       ),
                     ),
                   ),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Title + (removed main task status chip)
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -1223,12 +1275,20 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
                           child: Row(
                             children: [
                               if (hasApproachingDeadline)
-                                const Icon(Icons.warning_amber, color: Colors.orange, size: 16),
-                              const SizedBox(width: 4),
+                                const Icon(
+                                  Icons.warning_amber,
+                                  color: Colors.orange,
+                                  size: 16,
+                                ),
+                              const SizedBox(width: 6),
                               Expanded(
                                 child: Text(
                                   task['title'] ?? 'Untitled Task',
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.brown),
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.brown,
+                                  ),
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -1236,70 +1296,45 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
                             ],
                           ),
                         ),
-                        _buildStatusChip(task['status'] ?? 'not_started'),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-
-                    if (task['description'] != null && task['description'].isNotEmpty)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            task['description'],
-                            style: const TextStyle(fontSize: 14, color: Colors.grey),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 8),
-                        ],
-                      ),
-
-                    // Progress Bar
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text("Progress: $progress%", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.grey)),
-                            Text("${100 - progress}% remaining", style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        LinearProgressIndicator(
-                          value: progress / 100,
-                          backgroundColor: Colors.grey[300],
-                          valueColor: AlwaysStoppedAnimation<Color>(_getProgressColor(progress)),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    // Footer with deadline and priority
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        if (deadline != null)
-                          Row(
-                            children: [
-                              Icon(Icons.calendar_today, size: 14, color: _getDeadlineColor(task['deadline'])),
-                              const SizedBox(width: 4),
-                              Text(
-                                DateFormat('MMM dd').format(deadline),
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: _getDeadlineColor(task['deadline']),
-                                  fontWeight: hasApproachingDeadline ? FontWeight.bold : FontWeight.normal,
-                                ),
-                              ),
-                            ],
-                          ),
+                        // only PRIORITY chip on right
                         _buildPriorityChip(task['priority'] ?? 'medium'),
                       ],
                     ),
+                    const SizedBox(height: 8),
+                    if (task['description'] != null &&
+                        task['description'].toString().trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          task['description'],
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    // progress + user status
+                    Text(
+                      "Progress: $progress%",
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    LinearProgressIndicator(
+                      value: progress / 100,
+                      backgroundColor: Colors.grey[300],
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        _getProgressColor(progress),
+                      ),
+                      minHeight: 8,
+                    ),
+                    const SizedBox(height: 8),
+                    _buildStatusChip(userStatus), // 👈 show user's status here
                   ],
                 ),
               ],
@@ -1310,7 +1345,26 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     );
   }
 
+  Widget _buildRecentActivitySection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          "Recent Activity",
+          style: TextStyle(
+            color: Colors.brown,
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
+        const SizedBox(height: 12),
+        ...recentTasks.map((task) => _buildRecentTaskItem(task)),
+      ],
+    );
+  }
+
   Widget _buildRecentTaskItem(dynamic task) {
+    final userStatus = task['userStatus'] ?? 'not_started';
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
@@ -1325,7 +1379,7 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
             width: 8,
             height: 8,
             decoration: BoxDecoration(
-              color: statusColors[task['status']] ?? Colors.grey,
+              color: statusColors[userStatus] ?? Colors.grey,
               shape: BoxShape.circle,
             ),
           ),
@@ -1339,10 +1393,10 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
             ),
           ),
           Text(
-            task['status']?.replaceAll('_', ' ') ?? 'not started',
+            userStatus.replaceAll('_', ' '),
             style: TextStyle(
               fontSize: 12,
-              color: statusColors[task['status']] ?? Colors.grey,
+              color: statusColors[userStatus] ?? Colors.grey,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -1357,17 +1411,117 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         children: [
           Icon(Icons.task_outlined, size: 64, color: Colors.grey[400]),
           const SizedBox(height: 16),
-          const Text("No Tasks Assigned", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
+          const Text(
+            "No Tasks Assigned",
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey,
+            ),
+          ),
           const SizedBox(height: 8),
-          const Text("You don't have any tasks assigned to you at the moment.", 
-               textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: Colors.grey)),
+          const Text(
+            "You don't have any tasks assigned to you at the moment.",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: Colors.grey),
+          ),
         ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: BackgroundContainer(
+        child: SafeArea(
+          child: isLoading
+              ? const Center(
+                  child: CircularProgressIndicator(color: Colors.brown),
+                )
+              : Column(
+                  children: [
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ProfileHeader(
+                              avatarUrl: userData?['avatarUrl'],
+                              fullName: userData?['fullName'],
+                              role: formatUserRole(userData?['role']),
+                              onNotification: () =>
+                                  print("🔔 Notification tapped"),
+                            ),
+                            const SizedBox(height: 20),
+
+                            if (deadlineTasks.isNotEmpty)
+                              _buildDeadlineNotification(),
+
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  "My Tasks",
+                                  style: TextStyle(
+                                    color: Colors.brown,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                  ),
+                                ),
+                                Text(
+                                  "${assignedTasks.length} tasks",
+                                  style: const TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+
+                            if (assignedTasks.isEmpty)
+                              _buildEmptyState()
+                            else
+                              Column(
+                                children: assignedTasks
+                                    .map((task) => _buildTaskCard(task))
+                                    .toList(),
+                              ),
+                            const SizedBox(height: 20),
+                            if (recentTasks.isNotEmpty)
+                              _buildRecentActivitySection(),
+                            const SizedBox(height: 20),
+                          ],
+                        ),
+                      ),
+                    ),
+                    CustomBottomNavBar(
+                      currentIndex: 1,
+                      onTap: (index) {
+                        if (index == 1) print("Navigate to profile");
+                      },
+                      userRole: userData?['role'] ?? '',
+                    ),
+                  ],
+                ),
+        ),
       ),
     );
   }

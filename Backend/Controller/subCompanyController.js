@@ -47,7 +47,7 @@ export const getAllSubCompanies = async (req, res) => {
     if (!subCompanies || subCompanies.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "No sub-companies found",
+        message: "No sub-companies found", 
       });
     }
 

@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:rudhram_frontend/screens/drive_screen.dart';
+import 'package:rudhram_frontend/screens/generate_invoice_screen.dart';
+import 'package:rudhram_frontend/screens/invoice_list_screen.dart';
 import 'package:rudhram_frontend/utils/custom_bottom_nav.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/api_config.dart';
@@ -13,6 +15,10 @@ import '../utils/snackbar_helper.dart';
 import '../widgets/profile_header.dart';
 import '../screens/task_screen.dart';
 import '../screens/meeting_screen.dart';
+import 'package:rudhram_frontend/screens/generate_receipt_screen.dart';
+import 'package:rudhram_frontend/screens/receipt_list_screen.dart';
+import 'package:rudhram_frontend/screens/add_addon_service_screen.dart';
+import 'package:rudhram_frontend/screens/list_addon_services_screen.dart';
 
 class QuickActionScreen extends StatefulWidget {
   const QuickActionScreen({super.key});
@@ -67,6 +73,22 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
     }
   }
 
+  String formatUserRole(String? role) {
+    if (role == null) return '';
+    switch (role.toUpperCase()) {
+      case 'SUPER_ADMIN':
+        return 'Super Admin';
+      case 'ADMIN':
+        return 'Admin';
+      case 'TEAM_MEMBER':
+        return 'Team Member';
+      case 'CLIENT':
+        return 'Client';
+      default:
+        return role;
+    }
+  }
+
   String _absUrl(String? maybeRelative) {
     if (maybeRelative == null || maybeRelative.isEmpty) return '';
     if (maybeRelative.startsWith('http')) return maybeRelative;
@@ -118,7 +140,7 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
                   ProfileHeader(
                     avatarUrl: userData?['avatarUrl'],
                     fullName: userData?['fullName'],
-                    role: userData?['role'] ?? "Super Admin",
+                    role: formatUserRole(userData?['role']),
                     showBackButton: true,
                     onBack: () => Navigator.pop(context),
                     onNotification: () {
@@ -158,30 +180,78 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) =>
-                                        const TaskScreen(), // 👈 navigate here
+                                    builder: (context) => const TaskScreen(),
                                   ),
                                 );
                               } else if (action['label'] == "New Meeting") {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) =>
-                                        const MeetingScreen(), // 👈 navigate here
+                                    builder: (context) => const MeetingScreen(),
                                   ),
                                 );
                               } else if (action['label'] == "Drive") {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
+                                    builder: (context) => const DriveScreen(),
+                                  ),
+                                );
+                              } else if (action['label'] == "New Invoice") {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
                                     builder: (context) =>
-                                        const DriveScreen(), // 👈 navigate here
+                                        const GenerateInvoiceScreen(),
+                                  ),
+                                );
+                              } else if (action['label'] == "Invoice List") {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const InvoiceListScreen(),
+                                  ),
+                                );
+                              } else if (action['label'] == "New Receipt") {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const GenerateReceiptScreen(),
+                                  ),
+                                );
+                              } else if (action['label'] == "Receipt List") {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const ReceiptListScreen(),
+                                  ),
+                                );
+                              } else if (action['label'] ==
+                                  "Add-On Service") {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        const AddAddOnServiceScreen(),
+                                  ),
+                                );
+                              } else if (action['label'] ==
+                                  "List Services") {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        const ListAddOnServicesScreen(),
                                   ),
                                 );
                               } else {
                                 print("Tapped on ${action['label']}");
                               }
                             },
+
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -272,14 +342,18 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
     );
   }
 
-  /// 🔸 Bottom Navbar (same as Home)
   final List<Map<String, dynamic>> _actions = [
     {'icon': Icons.calendar_month_outlined, 'label': "New Meeting"},
     {'icon': Icons.task_alt_outlined, 'label': "New Task"},
     {'icon': Icons.group_add_outlined, 'label': "Team Member"},
     {'icon': Icons.cloud_upload_outlined, 'label': "Drive"},
     {'icon': Icons.receipt_long_outlined, 'label': "New Invoice"},
+    {'icon': Icons.list_alt_outlined, 'label': "Invoice List"},
     {'icon': Icons.currency_rupee_outlined, 'label': "New Receipt"},
-    {'icon': Icons.notifications_active_outlined, 'label': "Notify"},
+    {'icon': Icons.receipt_outlined, 'label': "Receipt List"},
+
+    // 🔻 New actions
+    {'icon': Icons.add_circle_outline, 'label': "Add-On Service"},
+    {'icon': Icons.view_list_outlined, 'label': "List Services"},
   ];
 }

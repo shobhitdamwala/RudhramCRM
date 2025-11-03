@@ -21,7 +21,7 @@ class TeamMemberDetailsScreen extends StatefulWidget {
 class _TeamMemberDetailsScreenState extends State<TeamMemberDetailsScreen> {
   bool _loading = true;
   String? _error;
-Map<String, dynamic>? userData;
+  Map<String, dynamic>? userData;
   Map<String, dynamic>? _teamMember;
 
   // All items from list APIs
@@ -40,6 +40,12 @@ Map<String, dynamic>? userData;
   void initState() {
     super.initState();
     _fetchAll();
+  }
+
+  String _absImage(String? p) {
+    if (p == null || p.isEmpty) return '';
+    if (p.startsWith('http')) return p;
+    return "${ApiConfig.imageBaseUrl}$p";
   }
 
   Future<void> _fetchAll() async {
@@ -126,6 +132,25 @@ Map<String, dynamic>? userData;
 
   // ---- Data helpers ---------------------------------------------------------
 
+  // Get subcompanies with active ones first, then disabled ones
+  List<Map<String, dynamic>> get _sortedSubCompanies {
+    final List<Map<String, dynamic>> active = [];
+    final List<Map<String, dynamic>> inactive = [];
+
+    for (final sc in _allSubCompanies) {
+      final map = Map<String, dynamic>.from(sc as Map);
+      final id = (map['_id'] ?? map['id'] ?? '').toString();
+
+      if (_memberSubCompanyIds.contains(id)) {
+        active.add(map);
+      } else {
+        inactive.add(map);
+      }
+    }
+
+    return [...active, ...inactive];
+  }
+
   List<Map<String, dynamic>> get _filteredClients {
     final all = _allClients.map<Map<String, dynamic>>((e) {
       return Map<String, dynamic>.from(e as Map);
@@ -146,11 +171,29 @@ Map<String, dynamic>? userData;
     }).toList();
   }
 
+  // Get clients with active ones first, then disabled ones
+  List<Map<String, dynamic>> get _sortedClients {
+    final List<Map<String, dynamic>> active = [];
+    final List<Map<String, dynamic>> inactive = [];
+
+    for (final client in _filteredClients) {
+      final id = (client['_id'] ?? client['id'] ?? '').toString();
+
+      if (_memberClientIds.contains(id)) {
+        active.add(client);
+      } else {
+        inactive.add(client);
+      }
+    }
+
+    return [...active, ...inactive];
+  }
+
   Map<String, dynamic>? get _selectedClient =>
       (_selectedClientIndex != null &&
           _selectedClientIndex! >= 0 &&
-          _selectedClientIndex! < _filteredClients.length)
-      ? _filteredClients[_selectedClientIndex!]
+          _selectedClientIndex! < _sortedClients.length)
+      ? _sortedClients[_selectedClientIndex!]
       : null;
 
   Color _statusDot(String status) {
@@ -227,7 +270,11 @@ Map<String, dynamic>? userData;
         top: false,
         child: Padding(
           padding: const EdgeInsets.only(bottom: 5),
-          child: CustomBottomNavBar(currentIndex: 6, onTap: (index) {},userRole: userData?['role'] ?? '',),
+          child: CustomBottomNavBar(
+            currentIndex: 6,
+            onTap: (index) {},
+            userRole: userData?['role'] ?? '',
+          ),
         ),
       ),
     );
@@ -287,7 +334,8 @@ Map<String, dynamic>? userData;
   }
 
   Widget _buildSubCompanyStrip() {
-    if (_allSubCompanies.isEmpty) return const SizedBox.shrink();
+    final sortedSubCompanies = _sortedSubCompanies;
+    if (sortedSubCompanies.isEmpty) return const SizedBox.shrink();
 
     return SizedBox(
       height: 85,
@@ -295,9 +343,9 @@ Map<String, dynamic>? userData;
         padding: const EdgeInsets.symmetric(horizontal: 8),
         scrollDirection: Axis.horizontal,
         separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemCount: _allSubCompanies.length,
+        itemCount: sortedSubCompanies.length,
         itemBuilder: (context, i) {
-          final sc = _allSubCompanies[i] as Map<String, dynamic>;
+          final sc = sortedSubCompanies[i];
           final id = (sc['_id'] ?? sc['id'] ?? '').toString();
           final isActive = _memberSubCompanyIds.contains(id);
           final selected = id == _selectedSubCompanyId;
@@ -313,7 +361,7 @@ Map<String, dynamic>? userData;
                 : null, // 👈 disabled if not active
             child: Opacity(
               opacity: isActive ? 1.0 : 0.3,
-              child: _buildChip(sc['name'], sc['logoUrl'], selected),
+              child: _buildChip(sc['name'], sc['logoUrl'], selected, isActive),
             ),
           );
         },
@@ -321,23 +369,33 @@ Map<String, dynamic>? userData;
     );
   }
 
-  Widget _buildChip(String? name, String? logoUrl, bool selected) {
+  Widget _buildChip(
+    String? name,
+    String? logoUrl,
+    bool selected,
+    bool isActive,
+  ) {
+    final img = _absImage(logoUrl);
+
     return SizedBox(
       width: 50,
       child: Column(
         children: [
           CircleAvatar(
             radius: 25,
-            backgroundColor: selected ? Colors.brown : Colors.brown[200],
-            backgroundImage: (logoUrl != null && logoUrl.isNotEmpty)
-                ? NetworkImage(logoUrl)
-                : null,
-            child: (logoUrl == null || logoUrl.isEmpty)
+            backgroundColor: isActive
+                ? (selected ? Colors.brown : Colors.brown[200]!)
+                : Colors.grey[400]!,
+            backgroundImage: img.isNotEmpty ? NetworkImage(img) : null,
+            child: img.isEmpty
                 ? Text(
                     name != null && name.isNotEmpty
                         ? name[0].toUpperCase()
                         : '',
-                    style: const TextStyle(color: Colors.white),
+                    style: TextStyle(
+                      color: isActive ? Colors.white : Colors.grey[200],
+                      fontWeight: FontWeight.bold,
+                    ),
                   )
                 : null,
           ),
@@ -348,8 +406,10 @@ Map<String, dynamic>? userData;
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 10,
-              fontWeight: FontWeight.w500,
-              color: selected ? Colors.brown : Colors.black,
+              fontWeight: FontWeight.w600,
+              color: isActive
+                  ? (selected ? Colors.brown : Colors.black)
+                  : Colors.grey,
             ),
           ),
         ],
@@ -358,8 +418,10 @@ Map<String, dynamic>? userData;
   }
 
   Widget _buildClientStripOrSelected() {
+    final sortedClients = _sortedClients;
+
     if (_selectedClientIndex == null) {
-      if (_filteredClients.isEmpty) {
+      if (sortedClients.isEmpty) {
         return Container(
           padding: const EdgeInsets.all(16),
           child: const Text(
@@ -377,9 +439,9 @@ Map<String, dynamic>? userData;
             padding: const EdgeInsets.symmetric(horizontal: 8),
             scrollDirection: Axis.horizontal,
             separatorBuilder: (_, __) => const SizedBox(width: 8),
-            itemCount: _filteredClients.length,
+            itemCount: sortedClients.length,
             itemBuilder: (context, i) {
-              final client = _filteredClients[i];
+              final client = sortedClients[i];
               final id = (client['_id'] ?? client['id'] ?? '').toString();
               final name = (client['name'] ?? '').toString();
               final isActive = _memberClientIds.contains(id);
@@ -397,10 +459,14 @@ Map<String, dynamic>? userData;
                       children: [
                         CircleAvatar(
                           radius: 25,
-                          backgroundColor: Colors.brown[200],
+                          backgroundColor: isActive
+                              ? Colors.brown[200]!
+                              : Colors.grey[400]!,
                           child: Text(
                             name.isNotEmpty ? name[0].toUpperCase() : '',
-                            style: const TextStyle(color: Colors.white),
+                            style: TextStyle(
+                              color: isActive ? Colors.white : Colors.grey[200],
+                            ),
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -408,7 +474,10 @@ Map<String, dynamic>? userData;
                           name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 10),
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isActive ? Colors.black : Colors.grey,
+                          ),
                         ),
                       ],
                     ),
@@ -511,8 +580,20 @@ Map<String, dynamic>? userData;
                 : 0.0;
             final statusColor = _statusDot(status);
 
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+            return Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 6,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -522,52 +603,53 @@ Map<String, dynamic>? userData;
                         child: Text(
                           title,
                           style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
                           ),
-                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          color: statusColor,
-                          shape: BoxShape.circle,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        status.toUpperCase(),
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: statusColor,
+                        decoration: BoxDecoration(
+                          color: statusColor.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          status.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: statusColor,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 12),
                   Stack(
                     alignment: Alignment.centerRight,
                     children: [
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(10),
                         child: LinearProgressIndicator(
                           value: (progress.clamp(0.0, 100.0)) / 100.0,
-                          minHeight: 10,
-                          backgroundColor: Colors.brown.withOpacity(0.15),
+                          minHeight: 12,
+                          backgroundColor: Colors.grey.shade200,
                           valueColor: AlwaysStoppedAnimation<Color>(
                             statusColor,
                           ),
                         ),
                       ),
                       Padding(
-                        padding: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.only(right: 10),
                         child: Text(
                           "${progress.toInt()}%",
                           style: TextStyle(
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: FontWeight.bold,
                             color: statusColor,
                           ),

@@ -54,7 +54,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final token = prefs.getString('auth_token');
       if (token == null) return;
 
-      // ✅ Correct route: /api/v1/user + /me (NOT /user/me again)
       final res = await http.get(
         Uri.parse("${ApiConfig.baseUrl}/user/me"),
         headers: {
@@ -67,12 +66,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final data = jsonDecode(res.body);
         final u = Map<String, dynamic>.from(data['user'] ?? {});
         final avatar = (u['avatarUrl'] ?? '').toString();
-        // Use updatedAt as cache key if present
-        final cacheKey = (u['updatedAt'] ?? DateTime.now().toIso8601String()).toString();
+        final cacheKey = (u['updatedAt'] ?? DateTime.now().toIso8601String())
+            .toString();
         if (avatar.isNotEmpty && avatar.startsWith('/')) {
           u['avatarUrl'] = _absUrl(avatar, cacheKey: cacheKey);
         } else if (avatar.isNotEmpty) {
-          // External absolute URL — still attach cache buster to avoid stale cache
           u['avatarUrl'] = _absUrl(avatar, cacheKey: cacheKey);
         }
         if (mounted) setState(() => userData = u);
@@ -102,8 +100,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  /// -------- EDIT PROFILE DIALOG (with live avatar preview) --------
+  /// -------- EDIT PROFILE DIALOG (beautiful & professional) --------
   Future<void> _editProfileDialog() async {
+    // Guard: only SUPER_ADMIN can edit
+    if (!_isEditableRole) return;
     if (userData == null) return;
 
     final nameController = TextEditingController(text: userData?['fullName']);
@@ -121,9 +121,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return StatefulBuilder(
           builder: (context, setLocalState) {
             Future<void> pickImage() async {
+              if (saving) return;
               final picked = await ImagePicker().pickImage(
                 source: ImageSource.gallery,
-                imageQuality: 85, // smaller upload size
+                imageQuality: 85,
               );
               if (picked != null) {
                 setLocalState(() {
@@ -153,80 +154,218 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             final currentAvatarUrl = (userData?['avatarUrl'] ?? '').toString();
 
-            return AlertDialog(
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: 24,
+              ),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(20),
               ),
-              title: const Text(
-                "Edit Profile",
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              content: SingleChildScrollView(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    GestureDetector(
-                      onTap: saving ? null : pickImage,
-                      child: CircleAvatar(
-                        radius: 45,
-                        backgroundColor: Colors.brown[100],
-                        backgroundImage: tempAvatarFile != null
-                            ? FileImage(tempAvatarFile!)
-                            : (currentAvatarUrl.isNotEmpty
-                                ? NetworkImage(currentAvatarUrl) as ImageProvider
-                                : null),
-                        child: (tempAvatarFile == null && currentAvatarUrl.isEmpty)
-                            ? const Icon(Icons.camera_alt, color: Colors.brown, size: 32)
-                            : null,
+                    // Header
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.fromLTRB(20, 18, 14, 14),
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFFB87333), Color(0xFFD1A574)],
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.manage_accounts,
+                            color: Colors.white,
+                          ),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              "Edit Profile",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: saving
+                                ? null
+                                : () => Navigator.pop(context),
+                            icon: const Icon(Icons.close, color: Colors.white),
+                            tooltip: 'Close',
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 20),
-                    TextField(
-                      controller: nameController,
-                      enabled: !saving,
-                      decoration: const InputDecoration(labelText: "Full Name"),
+
+                    // Content
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 18, 18, 8),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          children: [
+                            // Avatar with edit badge
+                            Stack(
+                              children: [
+                                CircleAvatar(
+                                  radius: 48,
+                                  backgroundColor: const Color(0xFFF5E6D3),
+                                  backgroundImage: tempAvatarFile != null
+                                      ? FileImage(tempAvatarFile!)
+                                      : (currentAvatarUrl.isNotEmpty
+                                            ? NetworkImage(currentAvatarUrl)
+                                                  as ImageProvider
+                                            : null),
+                                  child:
+                                      (tempAvatarFile == null &&
+                                          currentAvatarUrl.isEmpty)
+                                      ? const Icon(
+                                          Icons.person,
+                                          color: Colors.brown,
+                                          size: 48,
+                                        )
+                                      : null,
+                                ),
+                                Positioned(
+                                  right: 0,
+                                  bottom: 0,
+                                  child: InkWell(
+                                    onTap: pickImage,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: AppColors.primaryColor,
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withOpacity(
+                                              0.2,
+                                            ),
+                                            blurRadius: 6,
+                                            offset: const Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      padding: const EdgeInsets.all(8),
+                                      child: const Icon(
+                                        Icons.edit,
+                                        color: Colors.white,
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+
+                            _prettyField(
+                              controller: nameController,
+                              label: "Full Name",
+                              icon: Icons.person_outline,
+                              enabled: !saving,
+                            ),
+                            _prettyField(
+                              controller: emailController,
+                              label: "Email",
+                              icon: Icons.email_outlined,
+                              keyboardType: TextInputType.emailAddress,
+                              enabled: !saving,
+                            ),
+                            _prettyField(
+                              controller: phoneController,
+                              label: "Phone",
+                              icon: Icons.phone_outlined,
+                              keyboardType: TextInputType.phone,
+                              enabled: !saving,
+                            ),
+                            _prettyField(
+                              controller: passwordController,
+                              label: "New Password (optional)",
+                              icon: Icons.lock_outline,
+                              obscure: true,
+                              enabled: !saving,
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: emailController,
-                      enabled: !saving,
-                      decoration: const InputDecoration(labelText: "Email"),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: phoneController,
-                      enabled: !saving,
-                      decoration: const InputDecoration(labelText: "Phone"),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: passwordController,
-                      enabled: !saving,
-                      obscureText: true,
-                      decoration: const InputDecoration(labelText: "New Password"),
+
+                    // Actions
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: saving
+                                  ? null
+                                  : () => Navigator.pop(context),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                side: const BorderSide(
+                                  color: Color(0xFFB87333),
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: const Text(
+                                "Cancel",
+                                style: TextStyle(
+                                  color: Color(0xFFB87333),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: saving ? null : onSave,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primaryColor,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                elevation: 2,
+                              ),
+                              child: saving
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Text(
+                                      "Save Changes",
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: saving ? null : () => Navigator.pop(context),
-                  child: const Text("Cancel", style: TextStyle(color: Colors.brown)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.brown[700],
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  onPressed: saving ? null : onSave,
-                  child: saving
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text("Save"),
-                ),
-              ],
             );
           },
         );
@@ -266,7 +405,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (password.isNotEmpty) request.fields['password'] = password;
 
       if (avatarFile != null) {
-        request.files.add(await http.MultipartFile.fromPath('avatar', avatarFile.path));
+        request.files.add(
+          await http.MultipartFile.fromPath('avatar', avatarFile.path),
+        );
       }
 
       final res = await request.send();
@@ -280,15 +421,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
 
       if (res.statusCode == 200) {
-        // Prefer server response; otherwise refetch
         if (decoded != null && decoded['superAdmin'] != null) {
           final updated = Map<String, dynamic>.from(decoded['superAdmin']);
-          // Rebuild avatar with cache buster so UI refreshes instantly
           final rawAvatar = (updated['avatarUrl'] ?? '').toString();
-          final cacheKey = (updated['updatedAt'] ??
-                  DateTime.now().toIso8601String())
-              .toString();
- 
+          final cacheKey =
+              (updated['updatedAt'] ?? DateTime.now().toIso8601String())
+                  .toString();
+
           if (rawAvatar.isNotEmpty) {
             updated['avatarUrl'] = _absUrl(rawAvatar, cacheKey: cacheKey);
           }
@@ -305,7 +444,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         SnackbarHelper.show(
           context,
           title: "Updated",
-          message: (decoded?['message'] ?? "Profile updated successfully").toString(),
+          message: (decoded?['message'] ?? "Profile updated successfully")
+              .toString(),
           type: ContentType.success,
         );
         return true;
@@ -330,11 +470,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  // ---- Role helpers ----
+  bool get _isEditableRole {
+    final r = (userData?['role'] ?? '').toString().toUpperCase();
+    return r == 'SUPER_ADMIN';
+  }
+
   String _formatRole(dynamic role) {
     final r = (role ?? '').toString().toUpperCase();
     if (r == 'SUPER_ADMIN') return "Super Admin";
     if (r == 'ADMIN') return "Admin";
-    if (r == 'USER') return "Team Member";
+    if (r == 'TEAM_MEMBER' || r == 'USER') return "Team Member";
+    if (r == 'CLIENT') return "Client";
     return r;
   }
 
@@ -350,33 +497,81 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final canEdit = _isEditableRole;
+    final String roleUpper = (userData?['role'] ?? '').toString().toUpperCase();
+    final int bottomIndex = roleUpper == 'TEAM_MEMBER' ? 3 : 4;
+
     return Scaffold(
       body: BackgroundContainer(
         child: SafeArea(
           child: isLoading
-              ? const Center(child: CircularProgressIndicator(color: Colors.brown))
+              ? const Center(
+                  child: CircularProgressIndicator(color: Colors.brown),
+                )
               : Column(
                   children: [
                     Expanded(
                       child: SingleChildScrollView(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                         child: Column(
                           children: [
                             const SizedBox(height: 10),
+                            // Avatar (tap only for SUPER_ADMIN)
                             Center(
                               child: GestureDetector(
-                                onTap: _editProfileDialog,
-                                child: CircleAvatar(
-                                  radius: 55,
-                                  backgroundColor: Colors.brown[100],
-                                  backgroundImage: (userData?['avatarUrl'] != null &&
-                                          (userData!['avatarUrl'] as String).isNotEmpty)
-                                      ? NetworkImage(userData!['avatarUrl'])
-                                      : null,
-                                  child: (userData?['avatarUrl'] == null ||
-                                          (userData!['avatarUrl'] as String).isEmpty)
-                                      ? const Icon(Icons.person, color: Colors.brown, size: 60)
-                                      : null,
+                                onTap: canEdit ? _editProfileDialog : null,
+                                child: Stack(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 55,
+                                      backgroundColor: Colors.brown[100],
+                                      backgroundImage:
+                                          (userData?['avatarUrl'] != null &&
+                                              (userData!['avatarUrl'] as String)
+                                                  .isNotEmpty)
+                                          ? NetworkImage(userData!['avatarUrl'])
+                                          : null,
+                                      child:
+                                          (userData?['avatarUrl'] == null ||
+                                              (userData!['avatarUrl'] as String)
+                                                  .isEmpty)
+                                          ? const Icon(
+                                              Icons.person,
+                                              color: Colors.brown,
+                                              size: 60,
+                                            )
+                                          : null,
+                                    ),
+                                    if (canEdit)
+                                      Positioned(
+                                        right: 0,
+                                        bottom: 0,
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: AppColors.primaryColor,
+                                            shape: BoxShape.circle,
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withOpacity(
+                                                  0.2,
+                                                ),
+                                                blurRadius: 6,
+                                                offset: const Offset(0, 2),
+                                              ),
+                                            ],
+                                          ),
+                                          padding: const EdgeInsets.all(6),
+                                          child: const Icon(
+                                            Icons.edit,
+                                            color: Colors.white,
+                                            size: 18,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -392,9 +587,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             const SizedBox(height: 5),
                             Text(
                               _formatRole(userData?['role']),
-                              style: const TextStyle(fontSize: 14, color: Colors.grey),
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
+                              ),
                             ),
                             const SizedBox(height: 25),
+
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
@@ -406,28 +605,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     color: Colors.brown,
                                   ),
                                 ),
-                                IconButton(
-                                  onPressed: _editProfileDialog,
-                                  icon: const Icon(Icons.edit_outlined, color: Colors.brown),
-                                ),
+                                if (canEdit)
+                                  IconButton(
+                                    onPressed: _editProfileDialog,
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      color: Colors.brown,
+                                    ),
+                                    tooltip: 'Edit Profile',
+                                  ),
                               ],
                             ),
                             const SizedBox(height: 10),
-                            _buildDetailCard(Icons.person_outline, "Full Name", userData?['fullName']),
-                            _buildDetailCard(Icons.email_outlined, "Email", userData?['email']),
-                            _buildDetailCard(Icons.phone_outlined, "Phone", userData?['phone']),
-                            _buildDetailCard(Icons.admin_panel_settings_outlined, "Role",
-                                _formatRole(userData?['role'])),
-                            _buildDetailCard(Icons.calendar_today_outlined, "Joined On",
-                                _formatDate(userData?['createdAt'])),
+
+                            _buildDetailCard(
+                              Icons.person_outline,
+                              "Full Name",
+                              userData?['fullName'],
+                            ),
+                            _buildDetailCard(
+                              Icons.email_outlined,
+                              "Email",
+                              userData?['email'],
+                            ),
+                            _buildDetailCard(
+                              Icons.phone_outlined,
+                              "Phone",
+                              userData?['phone'],
+                            ),
+                            _buildDetailCard(
+                              Icons.admin_panel_settings_outlined,
+                              "Role",
+                              _formatRole(userData?['role']),
+                            ),
+                            _buildDetailCard(
+                              Icons.calendar_today_outlined,
+                              "Joined On",
+                              _formatDate(userData?['createdAt']),
+                            ),
+
                             const SizedBox(height: 30),
                             Center(
                               child: ElevatedButton.icon(
                                 onPressed: _logout,
-                                icon: const Icon(Icons.logout, color: Colors.white),
+                                icon: const Icon(
+                                  Icons.logout,
+                                  color: Colors.white,
+                                ),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.brown[800],
-                                  padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                                  backgroundColor: AppColors.primaryColor,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 28,
+                                    vertical: 14,
+                                  ),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(10),
                                   ),
@@ -445,8 +675,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                     ),
-                    CustomBottomNavBar(currentIndex: 4, onTap: (index) {},userRole: userData?['role'] ?? '',),
-                  ],
+                    CustomBottomNavBar(
+                      currentIndex: bottomIndex,
+                      onTap: (index) {},
+                      userRole: userData?['role'] ?? '',
+                    ),
+                   ],
                 ),
         ),
       ),
@@ -485,7 +719,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                Text(
+                  label,
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
                 const SizedBox(height: 2),
                 Text(
                   val.isEmpty ? "—" : val,
@@ -499,6 +736,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // Pretty input used inside dialog
+  Widget _prettyField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    bool obscure = false,
+    bool enabled = true,
+    TextInputType? keyboardType,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: TextField(
+        controller: controller,
+        obscureText: obscure,
+        enabled: enabled,
+        keyboardType: keyboardType,
+        decoration: InputDecoration(
+          prefixIcon: Icon(icon, color: Colors.brown),
+          labelText: label,
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(
+            vertical: 14,
+            horizontal: 12,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Colors.brown),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: AppColors.primaryColor, width: 1.6),
+          ),
+        ),
       ),
     );
   }

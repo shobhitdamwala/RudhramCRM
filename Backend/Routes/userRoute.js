@@ -1,5 +1,5 @@
 import express from "express";
-import { deleteTeamMember, getAllTeamMembers, getTeamMemberDetails, getUserProfile, loginUser, registerUser, saveFcmToken, updateSuperAdmin, updateTeamMember } from "../Controller/userController.js";
+import { deleteTeamMember, getAllTeamMembers, getTeamMemberDetails, getUserProfile, loginUser, registerInit, registerResendOtp, registerUser, registerVerify, saveFcmToken, updateSuperAdmin, updateTeamMember } from "../Controller/userController.js";
 import { authenticate, authorize } from "../Middleware/authentication.js";
 import upload from "../Middleware/uploadMiddleware.js";
 
@@ -18,6 +18,13 @@ app.put("/superadmin/:id", upload.single("avatar"), updateSuperAdmin);
 app.delete("/team-members/:id", deleteTeamMember);
 
 app.get('/:teamMemberId/details',getTeamMemberDetails);
+
+//OTP
+app.post("/register-init", upload.single("avatar"), registerInit);
+
+app.post("/register-verify", registerVerify);
+
+app.post("/register-resend-otp", registerResendOtp);
 
 
 export default app;

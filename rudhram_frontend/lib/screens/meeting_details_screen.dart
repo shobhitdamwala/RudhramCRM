@@ -95,6 +95,7 @@ class _MeetingDetailsScreenState extends State<MeetingDetailsScreen> {
       appBar: AppBar(
         title: const Text('Meeting Details'),
         backgroundColor: AppColors.primaryColor,
+        foregroundColor: Colors.white,
         actions: [
           IconButton(
             icon: const Icon(Icons.share, color: Colors.white),
@@ -141,7 +142,7 @@ ${m['meetingPassword'] != null && m['meetingPassword'].toString().isNotEmpty ? '
                             style: const TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
-                              color: Colors.brown,
+                              color: AppColors.primaryColor,
                             ),
                           ),
                           const SizedBox(height: 4),
@@ -156,7 +157,7 @@ ${m['meetingPassword'] != null && m['meetingPassword'].toString().isNotEmpty ? '
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.share, color: Colors.brown),
+                      icon: const Icon(Icons.share, color: AppColors.primaryColor),
                       tooltip: 'Share meeting',
                       onPressed: () {
               final m = widget.meeting;

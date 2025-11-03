@@ -32,7 +32,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
   Map<String, dynamic>? userData;
   List<dynamic> meetings = [];
   bool isLoading = true;
-  int _currentIndex = 3; // adapt to your nav mapping
+  int _currentIndex = 2; // adapt to your nav mapping
 
   @override
   void initState() {
@@ -151,6 +151,23 @@ class _MeetingScreenState extends State<MeetingScreen> {
     }
   }
 
+  String formatUserRole(String? role) {
+    if (role == null) return '';
+    switch (role.toUpperCase()) {
+      case 'SUPER_ADMIN':
+        return 'Super Admin';
+      case 'ADMIN':
+        return 'Admin';
+      case 'TEAM_MEMBER':
+        return 'Team Member';
+      case 'CLIENT':
+        return 'Client';
+      default:
+        return role;
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -158,12 +175,16 @@ class _MeetingScreenState extends State<MeetingScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              ProfileHeader(
-                avatarUrl: userData?['avatarUrl'],
-                fullName: userData?['fullName'],
-                role: userData?['role'] ?? '',
-                onNotification: () {},
-              ),
+             ProfileHeader(
+                    avatarUrl: userData?['avatarUrl'],
+                    fullName: userData?['fullName'],
+                    role: formatUserRole(userData?['role']),
+                    showBackButton: true,
+                    onBack: () => Navigator.pop(context),
+                    onNotification: () {
+                      print("🔔 Notification tapped");
+                    },
+                  ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
                 child: Row(
@@ -695,6 +716,7 @@ class _AddEditMeetingScreenState extends State<AddEditMeetingScreen> {
       appBar: AppBar(
         title: Text(widget.meeting == null ? 'Add Meeting' : 'Edit Meeting'),
         backgroundColor: AppColors.primaryColor,
+        foregroundColor: Colors.white,
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())

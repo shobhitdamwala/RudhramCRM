@@ -1,26 +1,53 @@
+// lib/main.dart
+import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:rudhram_frontend/screens/lead_list_screen.dart';
-import 'package:rudhram_frontend/screens/quick_action_screen.dart';
-import 'package:rudhram_frontend/screens/team_member_screen.dart';
-import 'screens/splash_screen.dart';
-import 'utils/constants.dart';
-import 'screens/task_screen.dart';
-import 'screens/meeting_screen.dart';
-import 'screens/login_screen.dart';
 
-// 🔹 Handle background notifications
+import 'package:rudhram_frontend/screens/splash_screen.dart';
+import 'package:rudhram_frontend/screens/login_screen.dart';
+import 'utils/constants.dart';
+import 'services/device_service.dart';
+import 'services/local_notifications.dart'; // ⬅️ NEW
+
+// Screens you already have:
+import 'screens/meeting_screen.dart';
+
+// Background FCM handler
+@pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  print("✅ Background Message: ${message.notification?.title}");
+  // process message.data if needed
 }
+
+// Deep-link helpers
+void _handleDeepLinkData(Map<String, dynamic> data) {
+  final payload =
+      data['payload'] ?? jsonEncode({'type': data['type'], 'meetingId': data['meetingId']});
+  if (payload is String) _handleDeepLinkPayload(payload);
+}
+
+void _handleDeepLinkPayload(String payload) {
+  try {
+    final map = jsonDecode(payload) as Map<String, dynamic>;
+    if (map['type'] == 'meeting' && map['meetingId'] != null) {
+      navigatorKey.currentState?.pushNamed('/meeting', arguments: map['meetingId']);
+    }
+  } catch (_) {
+    // ignore bad payload
+  }
+}
+
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
 
-  // 🔹 Setup background message handler
+  // ⬇️ Local notifications init (taps go to the deep-link handler)
+  await LocalNotifications.init(onTap: _handleDeepLinkPayload);
+
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
   runApp(const RudhramApp());
@@ -28,7 +55,6 @@ void main() async {
 
 class RudhramApp extends StatefulWidget {
   const RudhramApp({super.key});
-
   @override
   State<RudhramApp> createState() => _RudhramAppState();
 }
@@ -38,49 +64,52 @@ class _RudhramAppState extends State<RudhramApp> {
   void initState() {
     super.initState();
     _initFirebaseMessaging();
+    DeviceService.listenTokenRefresh();
   }
 
   Future<void> _initFirebaseMessaging() async {
-    FirebaseMessaging messaging = FirebaseMessaging.instance;
+    final messaging = FirebaseMessaging.instance;
 
-    // 🔹 Request notification permission (for Android & iOS)
-    NotificationSettings settings = await messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+    // Permissions (iOS + Android 13+)
+    await messaging.requestPermission(alert: true, badge: true, sound: true);
 
-    print('🔔 Permission granted: ${settings.authorizationStatus}');
-
-    // 🔹 Get FCM token (send to backend)
-    String? token = await messaging.getToken();
-    print("📱 FCM Token: $token");
-
-    // TODO: Send this token to your Node.js backend for storing
-
-    // 🔹 Foreground notification listener
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print("🔥 Foreground Message: ${message.notification?.title}");
-
-      // Optional: Show in-app alert
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message.notification?.title ?? "New Notification"),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+    // Foreground FCM debug log
+    FirebaseMessaging.onMessage.listen((m) {
+      debugPrint('📨 Foreground FCM: ${m.notification?.title} | data: ${m.data}');
     });
 
-    // 🔹 When app opened from background via notification
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      print("📬 App opened from notification: ${message.notification?.title}");
-      // Navigate to screen if needed
+    // App opened from notification (background)
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      debugPrint("📬 App opened from notification: ${message.data}");
+      _handleDeepLinkData(message.data);
     });
+
+    // Show a local notification for foreground FCM
+    FirebaseMessaging.onMessage.listen((message) async {
+      final notif = message.notification;
+      final data = message.data;
+
+      if (notif != null) {
+        await LocalNotifications.showBasic(
+          title: notif.title,
+          body: notif.body,
+          payload: {
+            'type': data['type'],
+            'meetingId': data['meetingId'],
+          },
+        );
+      }
+    });
+
+    // Tapped from terminated
+    final initial = await FirebaseMessaging.instance.getInitialMessage();
+    if (initial != null) _handleDeepLinkData(initial.data);
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'Rudhram CRM',
       theme: ThemeData(
@@ -90,7 +119,8 @@ class _RudhramAppState extends State<RudhramApp> {
       ),
       home: const SplashScreen(),
       routes: {
-        '/login': (context) => const LoginScreen(),
+        '/login': (_) => const LoginScreen(),
+        '/meeting': (_) => const MeetingScreen(),
       },
     );
   }

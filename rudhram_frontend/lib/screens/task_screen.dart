@@ -213,6 +213,98 @@ class _TaskScreenState extends State<TaskScreen> {
     }
   }
 
+  String formatUserRole(String? role) {
+    if (role == null) return '';
+    switch (role.toUpperCase()) {
+      case 'SUPER_ADMIN':
+        return 'Super Admin';
+      case 'ADMIN':
+        return 'Admin';
+      case 'TEAM_MEMBER':
+        return 'Team Member';
+      case 'CLIENT':
+        return 'Client';
+      default:
+        return role;
+    }
+  }
+
+  Widget _buildMemberProgressList(dynamic task) {
+    final assignments = task['assignments'] ?? [];
+
+    if (assignments.isEmpty) {
+      return const SizedBox();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 10),
+        const Text(
+          "Assigned Members",
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Colors.brown,
+          ),
+        ),
+        const SizedBox(height: 6),
+        ...assignments.map<Widget>((a) {
+          final user = a['user'] ?? {};
+          final name = user['fullName'] ?? 'Unknown';
+          final progress = a['progress'] ?? 0;
+          final status = a['status'] ?? 'not_started';
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: Colors.grey.shade100,
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.person, size: 18, color: Colors.brown),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      LinearProgressIndicator(
+                        value: progress / 100,
+                        minHeight: 6,
+                        backgroundColor: Colors.grey.shade300,
+                        valueColor: AlwaysStoppedAnimation(
+                          AppColors.primaryColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  "${progress.toString()}%",
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -224,7 +316,7 @@ class _TaskScreenState extends State<TaskScreen> {
               ProfileHeader(
                 avatarUrl: userData?['avatarUrl'],
                 fullName: userData?['fullName'],
-                role: userData?['role'] ?? "Super Admin",
+                role: formatUserRole(userData?['role']),
                 showBackButton: true,
                 onBack: () => Navigator.pop(context),
                 onNotification: () {
@@ -411,6 +503,8 @@ class _TaskScreenState extends State<TaskScreen> {
                 "👤 Client: ${(task['client'] as Map)['name'] ?? ''}",
                 style: const TextStyle(fontSize: 12),
               ),
+            // show assigned member progress
+            _buildMemberProgressList(task),
           ],
         ),
         trailing: PopupMenuButton<String>(

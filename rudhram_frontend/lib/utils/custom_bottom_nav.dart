@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:rudhram_frontend/screens/completed_task_screen.dart';
+import 'package:rudhram_frontend/screens/team_member_dashboard.dart';
 import '../utils/constants.dart';
 import '../screens/home_screen.dart';
 import '../screens/task_screen.dart';
@@ -6,6 +8,8 @@ import '../screens/quick_action_screen.dart';
 import '../screens/team_member_screen.dart';
 import '../screens/profile_screen.dart';
 import '../screens/teammember_home_screen.dart';
+import '../screens/app_page_screen.dart';
+ // ✅ Add your completed task screen
 
 class CustomBottomNavBar extends StatelessWidget {
   final int currentIndex;
@@ -23,34 +27,38 @@ class CustomBottomNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool isTeamMember = userRole == "TEAM_MEMBER";
 
-    final List<IconData> icons = isTeamMember
-        ? [Icons.home_outlined, Icons.person_outline]
-        : [
-            Icons.home_outlined,
-            Icons.task_alt_outlined,
-            Icons.bolt_outlined,
-            Icons.grid_view_rounded,
-            Icons.person_outline,
-          ];
+    // ✅ Team Member Icons: Home, Task, Completed Task, Profile
+    final List<IconData> teamIcons = [
+      Icons.home_outlined,
+      Icons.task_alt_outlined,
+      Icons.check_circle_outline, // completed task
+      Icons.person_outline,
+    ];
+
+    // Admin / Super Admin Icons
+    final List<IconData> adminIcons = [
+      Icons.home_outlined,
+      Icons.task_alt_outlined,
+      Icons.bolt_outlined,
+      Icons.grid_view_rounded,
+      Icons.person_outline,
+    ];
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
       decoration: const BoxDecoration(color: Colors.transparent),
       child: Row(
-        mainAxisAlignment:
-            isTeamMember ? MainAxisAlignment.center : MainAxisAlignment.spaceBetween,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: isTeamMember
-            ? [
-                _buildSquareIcon(context, icons[0], 0, isTeamMember),
-                const SizedBox(width: 40), // 👈 spacing between the two icons
-                _buildSquareIcon(context, icons[1], 1, isTeamMember),
-              ]
+            ? List.generate(teamIcons.length, (index) {
+                return _buildSquareIcon(context, teamIcons[index], index, true);
+              })
             : [
-                _buildSquareIcon(context, icons[0], 0, isTeamMember),
-                _buildSquareIcon(context, icons[1], 1, isTeamMember),
-                _buildCenterCircleIcon(context, icons[2]),
-                _buildSquareIcon(context, icons[3], 3, isTeamMember),
-                _buildSquareIcon(context, icons[4], 4, isTeamMember),
+                _buildSquareIcon(context, adminIcons[0], 0, false),
+                _buildSquareIcon(context, adminIcons[1], 1, false),
+                _buildCenterImageIcon(context, 2),
+                _buildSquareIcon(context, adminIcons[3], 3, false),
+                _buildSquareIcon(context, adminIcons[4], 4, false),
               ],
       ),
     );
@@ -63,6 +71,7 @@ class CustomBottomNavBar extends StatelessWidget {
     bool isTeamMember,
   ) {
     final isActive = currentIndex == index;
+
     return GestureDetector(
       onTap: () {
         onTap(index);
@@ -71,37 +80,56 @@ class CustomBottomNavBar extends StatelessWidget {
       child: Container(
         width: 50,
         height: 50,
+        margin: const EdgeInsets.symmetric(horizontal: 4),
         decoration: BoxDecoration(
-          color: isActive
-              ? const Color.fromARGB(255, 0, 0, 0)
-              : const Color(0xFFF5E6D3),
+          color: isActive ? Colors.black : const Color(0xFFF5E6D3),
           borderRadius: BorderRadius.circular(14),
         ),
         child: Icon(
           icon,
           color: isActive ? AppColors.primaryColor : Colors.brown,
-          size: 32,
+          size: 30,
         ),
       ),
     );
   }
 
-  Widget _buildCenterCircleIcon(BuildContext context, IconData icon) {
+  /// Center circular logo button (for Admin roles only)
+  Widget _buildCenterImageIcon(BuildContext context, int index) {
+    final bool isActive = currentIndex == index;
+
     return GestureDetector(
       onTap: () {
-        Navigator.push(
+        onTap(index);
+        Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const QuickActionScreen()),
         );
       },
       child: Container(
-        width: 68,
-        height: 68,
-        decoration: const BoxDecoration(
-          color: Color(0xFFF5E6D3),
+        width: 70,
+        height: 70,
+        decoration: BoxDecoration(
+          color: isActive ? Colors.black : const Color(0xFFF5E6D3),
           shape: BoxShape.circle,
+          boxShadow: [
+            if (isActive)
+              BoxShadow(
+                color: AppColors.primaryColor.withOpacity(0.4),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+          ],
         ),
-        child: Icon(icon, color: AppColors.primaryColor, size: 38),
+        child: ClipOval(
+          child: Padding(
+            padding: const EdgeInsets.all(10.0),
+            child: Image.asset(
+              'assets/logo_bottom.png',
+              fit: BoxFit.contain,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -110,17 +138,25 @@ class CustomBottomNavBar extends StatelessWidget {
     Widget page;
 
     if (isTeamMember) {
+      // ✅ TEAM MEMBER NAVIGATION
       switch (index) {
         case 0:
-          page = const TeamMemberHomeScreen();
+          page = const TeamMemberDashboard(); // Home
           break;
         case 1:
-          page = const ProfileScreen();
+          page = const TeamMemberHomeScreen(); // Task
+          break;
+        case 2:
+          page = const CompletedTaskScreen(); // ✅ Completed Task page
+          break;
+        case 3:
+          page = const ProfileScreen(); // Profile
           break;
         default:
           return;
       }
     } else {
+      // ✅ ADMIN / SUPER ADMIN NAVIGATION
       switch (index) {
         case 0:
           page = const HomeScreen();
@@ -128,8 +164,11 @@ class CustomBottomNavBar extends StatelessWidget {
         case 1:
           page = const TaskScreen();
           break;
-        case 3:
+        case 2:
           page = const QuickActionScreen();
+          break;
+        case 3:
+          page = const AppPageScreen();
           break;
         case 4:
           page = const ProfileScreen();

@@ -9,6 +9,18 @@ class SnackbarHelper {
     required String message,
     required ContentType type,
   }) {
+    Color themeColor;
+
+    if (type == ContentType.success) {
+      themeColor = AppColors.primaryColor; // Premium Green Success
+    } else if (type == ContentType.failure) {
+      themeColor = const Color(0xFFB3261E); // Rich Deep Red Failure
+    } else if (type == ContentType.warning) {
+      themeColor = AppColors.primaryColor; // Copper theme for warning
+    } else {
+      themeColor = AppColors.primaryColor;
+    }
+
     final snackBar = SnackBar(
       elevation: 0,
       behavior: SnackBarBehavior.floating,
@@ -17,11 +29,7 @@ class SnackbarHelper {
         title: title,
         message: message,
         contentType: type,
-        color: type == ContentType.failure
-            ? Colors.red.shade700
-            : type == ContentType.success
-                ? const Color.fromARGB(255, 113, 234, 88)
-                : const Color.fromARGB(255, 255, 0, 0),
+        color: themeColor,
       ),
     );
 

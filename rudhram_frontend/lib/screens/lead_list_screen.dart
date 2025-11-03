@@ -34,13 +34,10 @@ class _LeadListScreenState extends State<LeadListScreen> {
   String selectedStatus = "All";
 
   final Map<String, String?> statusSelections = {};
+  // <-- Changed: only show "All" and "new" in the filter as you asked
   final List<String> statusFilters = [
     "All",
     "new",
-    "contacted",
-    "qualified",
-    "converted",
-    "lost",
   ];
   final List<String> editableStatuses = [
     "new",
@@ -79,6 +76,42 @@ class _LeadListScreenState extends State<LeadListScreen> {
     if (token != null) await fetchUser(token);
   }
 
+  String formatUserRole(String? role) {
+    if (role == null) return '';
+    switch (role.toUpperCase()) {
+      case 'SUPER_ADMIN':
+        return 'Super Admin';
+      case 'ADMIN':
+        return 'Admin';
+      case 'TEAM_MEMBER':
+        return 'Team Member';
+      case 'CLIENT':
+        return 'Client';
+      default:
+        return role;
+    }
+  }
+
+  Future<void> _showErrorSnack(
+    dynamic body, {
+    String fallback = "Request failed",
+  }) async {
+    try {
+      final b = body is String ? jsonDecode(body) : body;
+      final msg = (b?['message'] ?? b?['error'] ?? b?['msg'] ?? fallback)
+          .toString();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(fallback), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   Future<void> fetchUser(String token) async {
     try {
       final res = await http.get(
@@ -87,16 +120,34 @@ class _LeadListScreenState extends State<LeadListScreen> {
       );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        if (mounted) setState(() => userData = data['user']);
+        final u = Map<String, dynamic>.from(data['user'] ?? {});
+        if (u['avatarUrl'] != null &&
+            u['avatarUrl'].toString().startsWith('/')) {
+          u['avatarUrl'] = _absUrl(u['avatarUrl']);
+        }
+        if (mounted) setState(() => userData = u);
+      } else {
+        await _showErrorSnack(res.body, fallback: "Failed to fetch user");
       }
     } catch (e) {
-      SnackbarHelper.show(
-        context,
-        title: "Error",
-        message: "User load error: $e",
-        type: ContentType.failure,
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("User load error: $e"),
+          backgroundColor: Colors.red,
+        ),
       );
     }
+  }
+
+  String _absUrl(String? maybeRelative) {
+    if (maybeRelative == null || maybeRelative.isEmpty) return '';
+    if (maybeRelative.startsWith('http')) return maybeRelative;
+
+    if (maybeRelative.startsWith('/uploads')) {
+      return "${ApiConfig.imageBaseUrl}$maybeRelative";
+    }
+    return "${ApiConfig.baseUrl}$maybeRelative";
   }
 
   Future<void> fetchLeads() async {
@@ -107,12 +158,19 @@ class _LeadListScreenState extends State<LeadListScreen> {
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         final list = List<dynamic>.from(data['data'] ?? []);
+
+        // <-- Changed: filter out "converted" leads so they are not shown
+        final visible = list.where((lead) {
+          final st = (lead['status'] ?? '').toString();
+          return st != 'converted';
+        }).toList();
+
         setState(() {
-          leads = list;
-          filteredLeads = list;
+          leads = visible;
+          filteredLeads = visible;
           isLoading = false;
           statusSelections.clear();
-          for (final lead in list) {
+          for (final lead in visible) {
             final id = lead['_id']?.toString() ?? '';
             final st = lead['status']?.toString();
             statusSelections[id] = editableStatuses.contains(st) ? st : null;
@@ -419,7 +477,7 @@ class _LeadListScreenState extends State<LeadListScreen> {
                     const SizedBox(height: 8),
                   ],
 
-                  // 🧰 Chosen Services
+                  // 🧰 Chosen Services with Selected Offerings
                   if (lead['chosenServices'] != null &&
                       (lead['chosenServices'] as List).isNotEmpty) ...[
                     const Text(
@@ -427,18 +485,117 @@ class _LeadListScreenState extends State<LeadListScreen> {
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 6,
-                      children: (lead['chosenServices'] as List).map((service) {
-                        final text = service is Map
-                            ? service['title'] ?? service.toString()
-                            : service.toString();
-                        return Chip(
-                          label: Text(text),
-                          backgroundColor: Colors.grey[200],
-                        );
-                      }).toList(),
-                    ),
+                    ...(lead['chosenServices'] as List).map((service) {
+                      final serviceTitle = service is Map
+                          ? service['title'] ?? service.toString()
+                          : service.toString();
+                      final selectedOfferings = service is Map
+                          ? (service['selectedOfferings'] as List?)?.map((offering) => offering.toString()).toList() ?? []
+                          : [];
+                      final subCompanyId = service is Map
+                          ? service['subCompanyId']?.toString()
+                          : null;
+
+                      // Find sub-company name
+                      String subCompanyName = '';
+                      if (subCompanyId != null && lead['subCompanyIds'] != null) {
+                        for (final sub in lead['subCompanyIds'] as List) {
+                          if (sub is Map && sub['_id']?.toString() == subCompanyId) {
+                            subCompanyName = sub['name']?.toString() ?? '';
+                            break;
+                          }
+                        }
+                      }
+
+                      return Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey[300]!),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Service title and sub-company
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    serviceTitle,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                                if (subCompanyName.isNotEmpty)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      subCompanyName,
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w500,
+                                        color: Colors.blue,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+
+                            // Selected offerings
+                            if (selectedOfferings.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              const Text(
+                                "Selected Offerings:",
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.black54,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Wrap(
+                                spacing: 4,
+                                runSpacing: 2,
+                                children: selectedOfferings.map((offering) {
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: Colors.green.withOpacity(0.3),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      offering,
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.green,
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                            ],
+                          ],
+                        ),
+                      );
+                    }).toList(),
                     const SizedBox(height: 8),
                   ],
 
@@ -558,6 +715,7 @@ class _LeadListScreenState extends State<LeadListScreen> {
           (lead['phone'] ?? '').toString().toLowerCase().contains(q) ||
           (lead['businessName'] ?? '').toString().toLowerCase().contains(q) ||
           (lead['token'] ?? '').toString().toLowerCase().contains(q);
+      // selectedStatus "All" means all (non-converted) leads, otherwise filter by that status
       final matchStatus =
           selectedStatus == "All" || lead['status'] == selectedStatus;
       return matchSearch && matchStatus;
@@ -655,10 +813,13 @@ class _LeadListScreenState extends State<LeadListScreen> {
             children: [
               ProfileHeader(
                 avatarUrl: userData?['avatarUrl'],
-                fullName: userData?['fullName'],
-                role: userData?['role'] ?? "Super Admin",
+                fullName: userData?['fullName'] ?? '',
+                role: formatUserRole(userData?['role']),
                 showBackButton: true,
                 onBack: () => Navigator.pop(context),
+                onNotification: () {
+                  debugPrint("🔔 Notification tapped");
+                },
               ),
               // 🔍 Search + Filter
               Padding(
@@ -710,287 +871,287 @@ class _LeadListScreenState extends State<LeadListScreen> {
                 child: isLoading
                     ? shimmerLoader()
                     : filteredLeads.isEmpty
-                    ? const Center(child: Text("No leads found"))
-                    : RefreshIndicator(
-                        onRefresh: fetchLeads,
-                        child: ListView.builder(
-                          itemCount: filteredLeads.length,
-                          itemBuilder: (context, index) {
-                            final lead = filteredLeads[index];
-                            final leadId = lead['_id'].toString();
-                            final status = (lead['status'] ?? 'new').toString();
-                            final token = (lead['token'] ?? '').toString();
-                            final phone = (lead['phone'] ?? '').toString();
+                        ? const Center(child: Text("No leads found"))
+                        : RefreshIndicator(
+                            onRefresh: fetchLeads,
+                            child: ListView.builder(
+                              itemCount: filteredLeads.length,
+                              itemBuilder: (context, index) {
+                                final lead = filteredLeads[index];
+                                final leadId = lead['_id'].toString();
+                                final status = (lead['status'] ?? 'new').toString();
+                                final token = (lead['token'] ?? '').toString();
+                                final phone = (lead['phone'] ?? '').toString();
 
-                            return Card(
-                              margin: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              elevation: 2,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(12.0),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // 👤 Top Row: Name + Status
-                                    Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
+                                return Card(
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                  elevation: 2,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12.0),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Expanded(
-                                          child: Row(
-                                            children: [
-                                              const Icon(
-                                                Icons.person,
-                                                size: 22,
-                                                color: Colors.blueAccent,
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Text(
-                                                  lead['name'] ?? '',
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.bold,
+                                        // 👤 Top Row: Name + Status
+                                        Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Expanded(
+                                              child: Row(
+                                                children: [
+                                                  const Icon(
+                                                    Icons.person,
+                                                    size: 22,
+                                                    color: Colors.blueAccent,
                                                   ),
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  maxLines: 1,
-                                                ),
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: Text(
+                                                      lead['name'] ?? '',
+                                                      style: const TextStyle(
+                                                        fontSize: 16,
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      maxLines: 1,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
-                                            ],
-                                          ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            FittedBox(
+                                              fit: BoxFit.scaleDown,
+                                              child: buildStatusChip(status),
+                                            ),
+                                          ],
                                         ),
-                                        const SizedBox(width: 8),
-                                        FittedBox(
-                                          fit: BoxFit.scaleDown,
-                                          child: buildStatusChip(status),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 6),
+                                        const SizedBox(height: 6),
 
-                                    // 🪪 Token row (if present)
-                                    if (token.isNotEmpty) ...[
-                                      Row(children: [tokenBadge(token)]),
-                                      const SizedBox(height: 6),
-                                    ],
+                                        // 🪪 Token row (if present)
+                                        if (token.isNotEmpty) ...[
+                                          Row(children: [tokenBadge(token)]),
+                                          const SizedBox(height: 6),
+                                        ],
 
-                                    // 📞 Phone row with call option
-                                    Row(
-                                      children: [
-                                        const Icon(
-                                          Icons.phone,
-                                          size: 18,
-                                          color: Colors.green,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Expanded(child: Text(phone)),
-                                        if (phone.isNotEmpty)
-                                          IconButton(
-                                            tooltip: "Call",
-                                            icon: const Icon(
-                                              Icons.call,
+                                        // 📞 Phone row with call option
+                                        Row(
+                                          children: [
+                                            const Icon(
+                                              Icons.phone,
+                                              size: 18,
                                               color: Colors.green,
                                             ),
-                                            onPressed: () =>
-                                                _makePhoneCall(phone),
-                                          ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
+                                            const SizedBox(width: 8),
+                                            Expanded(child: Text(phone)),
+                                            if (phone.isNotEmpty)
+                                              IconButton(
+                                                tooltip: "Call",
+                                                icon: const Icon(
+                                                  Icons.call,
+                                                  color: Colors.green,
+                                                ),
+                                                onPressed: () =>
+                                                    _makePhoneCall(phone),
+                                              ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
 
-                                    // ✉️ Email
-                                    Row(
-                                      children: [
-                                        const Icon(
-                                          Icons.email_outlined,
-                                          size: 18,
-                                          color: Colors.orange,
+                                        // ✉️ Email
+                                        Row(
+                                          children: [
+                                            const Icon(
+                                              Icons.email_outlined,
+                                              size: 18,
+                                              color: Colors.orange,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                lead['email'] ?? '',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Text(
-                                            lead['email'] ?? '',
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
+                                        const SizedBox(height: 4),
 
-                                    // 🏢 Business name
-                                    Row(
-                                      children: [
-                                        const Icon(
-                                          Icons.business,
-                                          size: 18,
-                                          color: Colors.purple,
+                                        // 🏢 Business name
+                                        Row(
+                                          children: [
+                                            const Icon(
+                                              Icons.business,
+                                              size: 18,
+                                              color: Colors.purple,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                lead['businessName'] ?? '',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Text(
-                                            lead['businessName'] ?? '',
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
 
-                                    const Divider(),
+                                        const Divider(),
 
-                                    // ℹ️ Action buttons
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        IconButton(
-                                          tooltip: 'Details',
-                                          icon: const Icon(
-                                            Icons.info_outline,
-                                            color: Colors.blue,
-                                          ),
-                                          onPressed: () =>
-                                              showLeadDetails(context, lead),
-                                        ),
-                                        IconButton(
-                                          tooltip: 'Delete',
-                                          icon: const Icon(
-                                            Icons.delete_outline,
-                                            color: Colors.redAccent,
-                                          ),
-                                          onPressed: () async {
-                                            final confirm = await showDialog<bool>(
-                                              context: context,
-                                              builder: (context) {
-                                                return AlertDialog(
-                                                  title: const Text(
-                                                    "Delete Lead",
-                                                  ),
-                                                  content: const Text(
-                                                    "Are you sure you want to delete this lead?",
-                                                  ),
-                                                  actions: [
-                                                    TextButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(
-                                                            context,
-                                                            false,
-                                                          ),
-                                                      child: const Text(
-                                                        "Cancel",
+                                        // ℹ️ Action buttons
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            IconButton(
+                                              tooltip: 'Details',
+                                              icon: const Icon(
+                                                Icons.info_outline,
+                                                color: Colors.blue,
+                                              ),
+                                              onPressed: () =>
+                                                  showLeadDetails(context, lead),
+                                            ),
+                                            IconButton(
+                                              tooltip: 'Delete',
+                                              icon: const Icon(
+                                                Icons.delete_outline,
+                                                color: Colors.redAccent,
+                                              ),
+                                              onPressed: () async {
+                                                final confirm = await showDialog<bool>(
+                                                  context: context,
+                                                  builder: (context) {
+                                                    return AlertDialog(
+                                                      title: const Text(
+                                                        "Delete Lead",
                                                       ),
-                                                    ),
-                                                    TextButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(
-                                                            context,
-                                                            true,
+                                                      content: const Text(
+                                                        "Are you sure you want to delete this lead?",
+                                                      ),
+                                                      actions: [
+                                                        TextButton(
+                                                          onPressed: () =>
+                                                              Navigator.pop(
+                                                                context,
+                                                                false,
+                                                              ),
+                                                          child: const Text(
+                                                            "Cancel",
                                                           ),
-                                                      child: const Text(
-                                                        "Delete",
-                                                        style: TextStyle(
-                                                          color: Colors.red,
                                                         ),
-                                                      ),
-                                                    ),
-                                                  ],
+                                                        TextButton(
+                                                          onPressed: () =>
+                                                              Navigator.pop(
+                                                                context,
+                                                                true,
+                                                              ),
+                                                          child: const Text(
+                                                            "Delete",
+                                                            style: TextStyle(
+                                                              color: Colors.red,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    );
+                                                  },
                                                 );
+                                                if (confirm == true) {
+                                                  deleteLead(leadId);
+                                                }
                                               },
-                                            );
-                                            if (confirm == true) {
-                                              deleteLead(leadId);
-                                            }
-                                          },
+                                            ),
+                                          ],
                                         ),
+
+                                        // ✏️ Update Lead & Status (only if not converted)
+                                        if (status != 'converted') ...[
+                                          ElevatedButton.icon(
+                                            onPressed: () async {
+                                              final result = await Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      UpdateLeadScreen(lead: lead),
+                                                ),
+                                              );
+                                              if (result == true) fetchLeads();
+                                            },
+                                            icon: const Icon(Icons.edit),
+                                            label: const Text("Update Lead"),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: _primary,
+                                              foregroundColor: Colors.white,
+                                              minimumSize: const Size(
+                                                double.infinity,
+                                                40,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 6),
+
+                                          ElevatedButton.icon(
+                                            onPressed: () async {
+                                              final result = await Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      UpdateStatusScreen(
+                                                        leadId: leadId,
+                                                        leadName:
+                                                            lead['name'] ?? '',
+                                                        currentStatus: status,
+                                                      ),
+                                                ),
+                                              );
+                                              if (result == true) fetchLeads();
+                                            },
+                                            icon: const Icon(Icons.sync_alt),
+                                            label: const Text("Update Status"),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Colors.orange,
+                                              foregroundColor: Colors.white,
+                                              minimumSize: const Size(
+                                                double.infinity,
+                                                40,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 6),
+                                        ],
+
+                                        // ✅ Convert to Client
+                                        if (status != 'converted')
+                                          ElevatedButton.icon(
+                                            onPressed: () =>
+                                                convertToClient(leadId),
+                                            icon: const Icon(
+                                              Icons.person_add_alt_1,
+                                            ),
+                                            label: const Text("Convert to Client"),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Colors.green,
+                                              foregroundColor: Colors.white,
+                                              minimumSize: const Size(
+                                                double.infinity,
+                                                40,
+                                              ),
+                                            ),
+                                          ),
                                       ],
                                     ),
-
-                                    // ✏️ Update Lead & Status (only if not converted)
-                                    if (status != 'converted') ...[
-                                      ElevatedButton.icon(
-                                        onPressed: () async {
-                                          final result = await Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (context) =>
-                                                  UpdateLeadScreen(lead: lead),
-                                            ),
-                                          );
-                                          if (result == true) fetchLeads();
-                                        },
-                                        icon: const Icon(Icons.edit),
-                                        label: const Text("Update Lead"),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: _primary,
-                                          foregroundColor: Colors.white,
-                                          minimumSize: const Size(
-                                            double.infinity,
-                                            40,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 6),
-
-                                      ElevatedButton.icon(
-                                        onPressed: () async {
-                                          final result = await Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (context) =>
-                                                  UpdateStatusScreen(
-                                                    leadId: leadId,
-                                                    leadName:
-                                                        lead['name'] ?? '',
-                                                    currentStatus: status,
-                                                  ),
-                                            ),
-                                          );
-                                          if (result == true) fetchLeads();
-                                        },
-                                        icon: const Icon(Icons.sync_alt),
-                                        label: const Text("Update Status"),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.orange,
-                                          foregroundColor: Colors.white,
-                                          minimumSize: const Size(
-                                            double.infinity,
-                                            40,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 6),
-                                    ],
-
-                                    // ✅ Convert to Client
-                                    if (status != 'converted')
-                                      ElevatedButton.icon(
-                                        onPressed: () =>
-                                            convertToClient(leadId),
-                                        icon: const Icon(
-                                          Icons.person_add_alt_1,
-                                        ),
-                                        label: const Text("Convert to Client"),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.green,
-                                          foregroundColor: Colors.white,
-                                          minimumSize: const Size(
-                                            double.infinity,
-                                            40,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
               ),
             ],
           ),
@@ -1003,7 +1164,6 @@ class _LeadListScreenState extends State<LeadListScreen> {
           onTap: (i) => setState(() => currentIndex = i),
           userRole: userData?['role'] ?? '',
         ),
-        
       ),
     );
   }

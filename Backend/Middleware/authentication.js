@@ -60,6 +60,22 @@ export const authenticate = async (req, res, next) => {
     res.status(500).json({ success: false, message: 'Server error in authentication' });
   }
 };
+
+export const authMiddleware = (req, res, next) => {
+  try {
+    const h = req.headers.authorization || '';
+    const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+    if (!token) return res.status(401).json({ success: false, message: 'No token' });
+
+    const secret = process.env.JWT_SECRET || 'your_jwt_secret';
+    const decoded = jwt.verify(token, secret);
+    req.user = { id: decoded.userId, role: decoded.role };
+    next();
+  } catch (e) {
+    return res.status(401).json({ success: false, message: 'Invalid token' });
+  }
+}
+
 export const authorize = (roles = []) => {
     if (typeof roles === 'string') {
         roles = [roles];

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -11,8 +12,6 @@ import '../utils/api_config.dart';
 import '../utils/snackbar_helper.dart';
 import '../widgets/profile_header.dart';
 import 'package:shimmer/shimmer.dart';
-
-
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
 
 class TeamMemberScreen extends StatefulWidget {
@@ -40,19 +39,6 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
     return token.startsWith('Bearer ')
         ? token.substring('Bearer '.length).trim()
         : token.trim();
-  }
-
-  String _absUrl(String? maybeRelative) {
-    if (maybeRelative == null || maybeRelative.isEmpty) return '';
-    if (maybeRelative.startsWith('http')) return maybeRelative;
-
-    if (maybeRelative.startsWith('/uploads')) {
-      // 🟢 Use image base URL
-      return "${ApiConfig.imageBaseUrl}$maybeRelative";
-    }
-
-    // Default
-    return "${ApiConfig.baseUrl}$maybeRelative";
   }
 
   Future<void> _showErrorSnack(
@@ -94,7 +80,6 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
 
       await Future.wait([fetchUser(token), fetchTeamMembers(token)]);
     } catch (e) {
-      // surface error
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -104,6 +89,22 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
       );
     } finally {
       if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  String formatUserRole(String? role) {
+    if (role == null) return '';
+    switch (role.toUpperCase()) {
+      case 'SUPER_ADMIN':
+        return 'Super Admin';
+      case 'ADMIN':
+        return 'Admin';
+      case 'TEAM_MEMBER':
+        return 'Team Member';
+      case 'CLIENT':
+        return 'Client';
+      default:
+        return role;
     }
   }
 
@@ -135,6 +136,16 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
     }
   }
 
+  String _absUrl(String? maybeRelative) {
+    if (maybeRelative == null || maybeRelative.isEmpty) return '';
+    if (maybeRelative.startsWith('http')) return maybeRelative;
+
+    if (maybeRelative.startsWith('/uploads')) {
+      return "${ApiConfig.imageBaseUrl}$maybeRelative";
+    }
+    return "${ApiConfig.baseUrl}$maybeRelative";
+  }
+
   Future<void> fetchTeamMembers(String token) async {
     try {
       final res = await http.get(
@@ -151,7 +162,6 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
           if (m['avatarUrl'] != null &&
               m['avatarUrl'].toString().startsWith('/')) {
             m['avatarUrl'] = _absUrl(m['avatarUrl']);
-            print("Member avatar fixed URL: ${m['avatarUrl']}");
           }
         }
 
@@ -173,6 +183,79 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
     }
   }
 
+  // ---------- OTP API HELPERS ----------
+  Future<Map<String, dynamic>> _registerInit(
+    Map<String, dynamic> data,
+    File? avatarFile,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = _cleanToken(prefs.getString('auth_token'));
+    if (token.isEmpty) throw Exception("Not logged in");
+
+    final uri = Uri.parse("${ApiConfig.baseUrl}/user/register-init");
+    final req = http.MultipartRequest('POST', uri)
+      ..headers['Authorization'] = "Bearer $token";
+
+    data.forEach((k, v) {
+      if (v != null && v.toString().isNotEmpty) req.fields[k] = v.toString();
+    });
+
+    if (avatarFile != null) {
+      req.files.add(
+        await http.MultipartFile.fromPath('avatar', avatarFile.path),
+      );
+    }
+
+    final resp = await req.send();
+    final body = await resp.stream.bytesToString();
+    final json = jsonDecode(body);
+    if (resp.statusCode == 200 && json['success'] == true) {
+      return json; // {success, message, tempId, expiresInSec}
+    } else {
+      throw Exception(json['message'] ?? 'Failed to start registration');
+    }
+  }
+
+  Future<void> _registerVerify(String tempId, String email, String otp) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = _cleanToken(prefs.getString('auth_token'));
+    if (token.isEmpty) throw Exception("Not logged in");
+
+    final res = await http.post(
+      Uri.parse("${ApiConfig.baseUrl}/user/register-verify"),
+      headers: {
+        "Authorization": "Bearer $token",
+        "Content-Type": "application/json",
+      },
+      body: jsonEncode({"tempId": tempId, "email": email, "otp": otp}),
+    );
+
+    final data = jsonDecode(res.body);
+    if (res.statusCode != 201 || data['success'] != true) {
+      throw Exception(data['message'] ?? 'Verification failed');
+    }
+  }
+
+  Future<void> _registerResendOtp(String tempId, String email) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = _cleanToken(prefs.getString('auth_token'));
+    if (token.isEmpty) throw Exception("Not logged in");
+
+    final res = await http.post(
+      Uri.parse("${ApiConfig.baseUrl}/user/register-resend-otp"),
+      headers: {
+        "Authorization": "Bearer $token",
+        "Content-Type": "application/json",
+      },
+      body: jsonEncode({"tempId": tempId, "email": email}),
+    );
+
+    final data = jsonDecode(res.body);
+    if (res.statusCode != 200 || data['success'] != true) {
+      throw Exception(data['message'] ?? 'Resend failed');
+    }
+  }
+
   // ---------- CRUD ----------
   Future<void> deleteMember(String id) async {
     try {
@@ -186,7 +269,6 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
       );
 
       if (res.statusCode == 200) {
-        // ✅ Remove from local list to update UI instantly
         setState(() {
           teamMembers.removeWhere((m) => m['_id'] == id);
         });
@@ -263,54 +345,154 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
     }
   }
 
+  /// ⬇️ REPLACED: Add Member now starts OTP flow (register-init) and opens OTP dialog.
   Future<void> addMember(Map<String, dynamic> newData, File? avatarFile) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = _cleanToken(prefs.getString('auth_token'));
-      if (token.isEmpty) return;
+      final init = await _registerInit(newData, avatarFile);
+      final tempId = init['tempId'] as String;
+      final expiresInSec = (init['expiresInSec'] as num?)?.toInt() ?? 600;
 
-      // NOTE: if your route is different, change path here (e.g. /auth/register)
-      final uri = Uri.parse("${ApiConfig.baseUrl}/user/register");
-
-      final req = http.MultipartRequest('POST', uri)
-        ..headers['Authorization'] = "Bearer $token";
-
-      newData.forEach((k, v) {
-        if (v != null) req.fields[k] = v.toString();
-      });
-
-      if (avatarFile != null) {
-        req.files.add(
-          await http.MultipartFile.fromPath('avatar', avatarFile.path),
-        );
-      }
-
-      final resp = await req.send();
-      final body = await resp.stream.bytesToString();
-
-      if (resp.statusCode == 201 || resp.statusCode == 200) {
-        if (!mounted) return;
-        SnackbarHelper.show(
-          context,
-          title: 'Success',
-          message: 'Member added successfully',
-          type: ContentType.success,
-        );
-        await fetchTeamMembers(token);
-      } else {
-        SnackbarHelper.show(
-          context,
-          title: 'Error',
-          message: 'Failed to add member',
-          type: ContentType.failure,
-        );
-      }
+      if (!mounted) return;
+      await _showOtpDialog(
+        email: newData['email'],
+        tempId: tempId,
+        expiresIn: Duration(seconds: expiresInSec),
+        onVerified: () async {
+          final prefs = await SharedPreferences.getInstance();
+          final token = _cleanToken(prefs.getString('auth_token'));
+          await fetchTeamMembers(token);
+          SnackbarHelper.show(
+            context,
+            title: 'Success',
+            message: 'Member added & verified.',
+            type: ContentType.success,
+          );
+        },
+      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Add error: $e"), backgroundColor: Colors.red),
+      SnackbarHelper.show(
+        context,
+        title: 'Error',
+        message: e.toString(),
+        type: ContentType.failure,
       );
     }
+  }
+
+  // ---------- Delete Confirmation Dialog ----------
+  Future<void> _showDeleteConfirmationDialog(
+    String memberId,
+    String memberName,
+  ) async {
+    return showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20.0),
+          ),
+          backgroundColor: const Color(0xFFFDF6EE),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.warning_rounded,
+                    size: 40,
+                    color: Colors.red.shade600,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Delete Team Member',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red.shade700,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Are you sure you want to delete "$memberName"?',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 16, color: Colors.brown),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'This action cannot be undone.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.red.shade600,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.brown,
+                          side: const BorderSide(color: Colors.brown),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade600,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 2,
+                        ),
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          deleteMember(memberId);
+                        },
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.delete_outline, size: 18),
+                            SizedBox(width: 6),
+                            Text(
+                              'Delete',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   // ---------- UI ----------
@@ -331,11 +513,10 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
                     ProfileHeader(
                       avatarUrl: userData?['avatarUrl'],
                       fullName: userData?['fullName'],
-                      role: userData?['role'],
+                      role: formatUserRole(userData?['role']),
                       showBackButton: true,
                       onBack: () => Navigator.pop(context),
                     ),
-
                     const SizedBox(height: 10),
                     Expanded(
                       child: showAll
@@ -346,55 +527,14 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
                     const SizedBox(height: 20),
                     _buildAddMemberButton(),
                     const SizedBox(height: 25),
-                    CustomBottomNavBar(currentIndex: 4, onTap: (i) {},userRole: userData?['role'] ?? '',),
+                    CustomBottomNavBar(
+                      currentIndex: 4,
+                      onTap: (i) {},
+                      userRole: userData?['role'] ?? '',
+                    ),
                   ],
                 ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 26,
-                backgroundImage:
-                    (userData?['avatarUrl'] != null &&
-                        (userData!['avatarUrl'] as String).isNotEmpty)
-                    ? NetworkImage(userData!['avatarUrl'])
-                    : const AssetImage('assets/user.jpg') as ImageProvider,
-              ),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    userData?['fullName'] ?? 'Hi...',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.brown,
-                    ),
-                  ),
-                  Text(
-                    userData?['role'] ?? '',
-                    style: const TextStyle(fontSize: 13, color: Colors.grey),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new, color: Colors.brown),
-            onPressed: () => Navigator.pop(context),
-          ),
-        ],
       ),
     );
   }
@@ -422,7 +562,6 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
                         ? NetworkImage(m['avatarUrl'])
                         : const AssetImage('assets/user.jpg') as ImageProvider,
                   ),
-
                   const SizedBox(height: 6),
                   Text(
                     m['fullName'] ?? '',
@@ -564,7 +703,7 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: Colors.brown,
+                              color: AppColors.primaryColor,
                             ),
                           ),
                           IconButton(
@@ -580,10 +719,11 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
                           final picked = await picker.pickImage(
                             source: ImageSource.gallery,
                           );
-                          if (picked != null)
+                          if (picked != null) {
                             setStateDialog(
                               () => selectedImage = File(picked.path),
                             );
+                          }
                         },
                         child: selectedImage == null
                             ? Container(
@@ -737,7 +877,7 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
     final phoneController = TextEditingController(text: member['phone']);
     final cityController = TextEditingController(text: member['city']);
     final stateController = TextEditingController(text: member['state']);
-    final passwordController = TextEditingController(); // 👈 ADD THIS
+    final passwordController = TextEditingController();
 
     String role = member['role'] ?? "TEAM_MEMBER";
     File? selectedImage;
@@ -767,7 +907,7 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: Colors.brown,
+                              color: AppColors.primaryColor,
                             ),
                           ),
                           IconButton(
@@ -783,10 +923,11 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
                           final picked = await picker.pickImage(
                             source: ImageSource.gallery,
                           );
-                          if (picked != null)
+                          if (picked != null) {
                             setStateDialog(
                               () => selectedImage = File(picked.path),
                             );
+                          }
                         },
                         child: selectedImage == null
                             ? CircleAvatar(
@@ -824,7 +965,6 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
                         Icons.lock,
                         obscure: true,
                       ),
-
                       DropdownButtonFormField<String>(
                         value: role,
                         decoration: InputDecoration(
@@ -867,7 +1007,10 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
                             ),
                             onPressed: () {
                               Navigator.pop(context);
-                              deleteMember(member['_id']);
+                              _showDeleteConfirmationDialog(
+                                member['_id'],
+                                member['fullName'] ?? 'this member',
+                              );
                             },
                             icon: const Icon(
                               Icons.delete_outline,
@@ -946,110 +1089,350 @@ class _TeamMemberScreenState extends State<TeamMemberScreen> {
       ),
     );
   }
+
   Widget _buildShimmerHeader() {
-  return Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16),
-    child: Row(
-      children: [
-        Shimmer.fromColors(
-          baseColor: Colors.grey.shade300,
-          highlightColor: Colors.grey.shade100,
-          child: const CircleAvatar(radius: 25),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Shimmer.fromColors(
+            baseColor: Colors.grey.shade300,
+            highlightColor: Colors.grey.shade100,
+            child: const CircleAvatar(radius: 25),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Shimmer.fromColors(
+                  baseColor: Colors.grey.shade300,
+                  highlightColor: Colors.grey.shade100,
+                  child: Container(height: 16, width: 120, color: Colors.white),
+                ),
+                const SizedBox(height: 8),
+                Shimmer.fromColors(
+                  baseColor: Colors.grey.shade300,
+                  highlightColor: Colors.grey.shade100,
+                  child: Container(height: 14, width: 180, color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildShimmerSubCompanyList() {
+    return SizedBox(
+      height: 85,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: 4,
+        itemBuilder: (_, i) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Shimmer.fromColors(
                 baseColor: Colors.grey.shade300,
                 highlightColor: Colors.grey.shade100,
-                child: Container(
-                  height: 16,
-                  width: 120,
-                  color: Colors.white,
-                ),
+                child: const CircleAvatar(radius: 25),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 5),
               Shimmer.fromColors(
                 baseColor: Colors.grey.shade300,
                 highlightColor: Colors.grey.shade100,
-                child: Container(
-                  height: 14,
-                  width: 180,
-                  color: Colors.white,
-                ),
+                child: Container(height: 10, width: 50, color: Colors.white),
               ),
             ],
           ),
         ),
-      ],
-    ),
-  );
-}
+      ),
+    );
+  }
 
-Widget _buildShimmerSubCompanyList() {
-  return SizedBox(
-    height: 85,
-    child: ListView.builder(
-      scrollDirection: Axis.horizontal,
-      itemCount: 4,
-      itemBuilder: (_, i) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Column(
-          children: [
-            Shimmer.fromColors(
-              baseColor: Colors.grey.shade300,
-              highlightColor: Colors.grey.shade100,
-              child: const CircleAvatar(radius: 25),
-            ),
-            const SizedBox(height: 5),
-            Shimmer.fromColors(
-              baseColor: Colors.grey.shade300,
-              highlightColor: Colors.grey.shade100,
-              child: Container(
-                height: 10,
-                width: 50,
-                color: Colors.white,
+  Widget _buildShimmerClientStrip() {
+    return SizedBox(
+      height: 85,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: 5,
+        itemBuilder: (_, i) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Column(
+            children: [
+              Shimmer.fromColors(
+                baseColor: Colors.grey.shade300,
+                highlightColor: Colors.grey.shade100,
+                child: const CircleAvatar(radius: 25),
               ),
-            ),
-          ],
+              const SizedBox(height: 5),
+              Shimmer.fromColors(
+                baseColor: Colors.grey.shade300,
+                highlightColor: Colors.grey.shade100,
+                child: Container(height: 10, width: 50, color: Colors.white),
+              ),
+            ],
+          ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
-Widget _buildShimmerClientStrip() {
-  return SizedBox(
-    height: 85,
-    child: ListView.builder(
-      scrollDirection: Axis.horizontal,
-      itemCount: 5,
-      itemBuilder: (_, i) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Column(
-          children: [
-            Shimmer.fromColors(
-              baseColor: Colors.grey.shade300,
-              highlightColor: Colors.grey.shade100,
-              child: const CircleAvatar(radius: 25),
-            ),
-            const SizedBox(height: 5),
-            Shimmer.fromColors(
-              baseColor: Colors.grey.shade300,
-              highlightColor: Colors.grey.shade100,
-              child: Container(
-                height: 10,
-                width: 50,
-                color: Colors.white,
+  // ---------- OTP Dialog ----------
+  Future<void> _showOtpDialog({
+    required String email,
+    required String tempId,
+    required Duration expiresIn,
+    required VoidCallback onVerified,
+  }) async {
+    final otpController = TextEditingController();
+    int secondsLeft = expiresIn.inSeconds;
+    bool isVerifying = false;
+    bool canResend = false;
+
+    // simple ticker
+    late final _SimpleTicker ticker;
+    ticker = _SimpleTicker((elapsed) {
+      if (!mounted) return;
+      setState(() {
+        if (secondsLeft > 0) secondsLeft -= 1;
+        if (secondsLeft <= 0) canResend = true;
+      });
+    })..start();
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setStateDialog) {
+            Future<void> verify() async {
+              final code = otpController.text.trim();
+              if (code.length != 6) {
+                SnackbarHelper.show(
+                  ctx,
+                  title: 'Invalid',
+                  message: 'Enter the 6-digit code.',
+                  type: ContentType.warning,
+                );
+                return;
+              }
+              setStateDialog(() => isVerifying = true);
+              try {
+                await _registerVerify(tempId, email, code);
+                Navigator.of(ctx).pop(); // close dialog
+                ticker.dispose();
+                onVerified();
+              } catch (e) {
+                SnackbarHelper.show(
+                  ctx,
+                  title: 'Error',
+                  message: e.toString(),
+                  type: ContentType.failure,
+                );
+              } finally {
+                if (mounted) setStateDialog(() => isVerifying = false);
+              }
+            }
+
+            Future<void> resend() async {
+              if (!canResend) return;
+              try {
+                await _registerResendOtp(tempId, email);
+                setStateDialog(() {
+                  secondsLeft = 600;
+                  canResend = false;
+                });
+              } catch (e) {
+                SnackbarHelper.show(
+                  ctx,
+                  title: 'Error',
+                  message: e.toString(),
+                  type: ContentType.failure,
+                );
+              }
+            }
+
+            String mmss(int s) {
+              final m = (s ~/ 60).toString().padLeft(2, '0');
+              final ss = (s % 60).toString().padLeft(2, '0');
+              return "$m:$ss";
+            }
+
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
               ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
+              backgroundColor: const Color(0xFFFDF6EE),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.mark_email_read,
+                      size: 48,
+                      color: Colors.brown,
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      "Email Verification",
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.brown,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      "We sent a 6-digit code to\n$email",
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.brown),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // OTP input
+                    TextField(
+                      controller: otpController,
+                      keyboardType: TextInputType.number,
+                      maxLength: 6,
+                      textAlign: TextAlign.center,
+                      decoration: InputDecoration(
+                        counterText: "",
+                        hintText: "Enter OTP",
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: AppColors.primaryColor,
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                      onSubmitted: (_) => verify(),
+                    ),
+
+                    const SizedBox(height: 8),
+                    Text(
+                      canResend
+                          ? "Code expired"
+                          : "Expires in ${mmss(secondsLeft)}",
+                      style: TextStyle(
+                        color: canResend ? Colors.red.shade600 : Colors.brown,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: canResend ? resend : null,
+                            icon: const Icon(Icons.refresh),
+                            label: Text(
+                              canResend
+                                  ? "Resend Code"
+                                  : "Resend in ${mmss(secondsLeft)}",
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.brown,
+                              side: const BorderSide(color: Colors.brown),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: isVerifying ? null : verify,
+                            icon: isVerifying
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(
+                                    Icons.verified_user,
+                                    color: Colors.white,
+                                  ),
+                            label: const Text(
+                              "Verify",
+                              style: TextStyle(color: Colors.white),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primaryColor,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: () {
+                        ticker.dispose();
+                        Navigator.of(ctx).pop();
+                      },
+                      child: const Text(
+                        "Cancel",
+                        style: TextStyle(color: Colors.brown),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (ticker.isActive) ticker.dispose();
+  }
 }
 
+/// Lightweight 1-second ticker (no external deps)
+class _SimpleTicker {
+  final void Function(Duration elapsed) onTick;
+  bool _active = false;
+  Duration _elapsed = Duration.zero;
+
+  _SimpleTicker(this.onTick);
+
+  bool get isActive => _active;
+
+  void start() {
+    _active = true;
+    _loop();
+  }
+
+  Future<void> _loop() async {
+    while (_active) {
+      await Future.delayed(const Duration(seconds: 1));
+      if (!_active) break;
+      _elapsed += const Duration(seconds: 1);
+      onTick(_elapsed);
+    }
+  }
+
+  void dispose() {
+    _active = false;
+  }
 }

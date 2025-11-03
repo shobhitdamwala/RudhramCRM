@@ -12,6 +12,7 @@ export const addTask = async (req, res) => {
       description,
       client,
       subCompany,
+      chosenServices,
       assignedTo,
       priority,
       status,
@@ -24,6 +25,10 @@ export const addTask = async (req, res) => {
       return res.status(400).json({ success: false, message: "Title is required" });
     }
 
+    if (!client) {
+      return res.status(400).json({ success: false, message: "Client is required" });
+    }
+
     // ✅ Validate client and subCompany IDs
     const validateId = (id, name) => {
       if (id && !mongoose.Types.ObjectId.isValid(id)) {
@@ -32,6 +37,11 @@ export const addTask = async (req, res) => {
     };
     validateId(client, "client");
     validateId(subCompany, "subCompany");
+
+    // ✅ Validate chosenServices
+    if (chosenServices && !Array.isArray(chosenServices)) {
+      return res.status(400).json({ success: false, message: "chosenServices must be an array" });
+    }
 
     // ✅ Validate assignedTo
     if (assignedTo && !Array.isArray(assignedTo)) {
@@ -50,19 +60,20 @@ export const addTask = async (req, res) => {
       }
     }
 
-    // 🆕 Create task
+    // 🆕 Create task with chosenServices
     const task = await Task.create({
       title,
       description,
       client,
       subCompany,
+      chosenServices: chosenServices || [],
       createdBy: req.user?._id || null,
-      assignedTo,
+      assignedTo: assignedTo || [],
       priority: priority || "medium",
       status: status || "open",
       deadline,
-      attachments,
-      comments,
+      attachments: attachments || [],
+      comments: comments || [],
       logs: [
         {
           action: "Task created",
@@ -89,10 +100,16 @@ export const addTask = async (req, res) => {
       await TaskAssignment.insertMany(assignments);
     }
 
+    // Populate the task with client details
+    const populatedTask = await Task.findById(task._id)
+      .populate('client', 'name email phone businessName meta')
+      .populate('assignedTo', 'fullName email')
+      .populate('createdBy', 'fullName email');
+
     return res.status(201).json({
       success: true,
       message: "Task created successfully",
-      data: task,
+      data: populatedTask,
     });
   } catch (err) {
     console.error("Error creating task:", err);
@@ -103,9 +120,20 @@ export const addTask = async (req, res) => {
 export const updateTask = async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const {
+      title,
+      description,
+      client,
+      subCompany,
+      chosenServices,
+      assignedTo,
+      priority,
+      status,
+      deadline,
+      attachments,
+      comments,
+    } = req.body;
 
-    // 🧭 Validate task ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, message: "Invalid task ID" });
     }
@@ -115,88 +143,52 @@ export const updateTask = async (req, res) => {
       return res.status(404).json({ success: false, message: "Task not found" });
     }
 
-    // 🧭 If assignedTo changed
-    if (updates.assignedTo && Array.isArray(updates.assignedTo)) {
-      // Validate all user IDs
-      for (const userId of updates.assignedTo) {
-        if (!mongoose.Types.ObjectId.isValid(userId)) {
-          return res.status(400).json({ success: false, message: `Invalid user ID: ${userId}` });
-        }
-        const exists = await User.findById(userId);
-        if (!exists) {
-          return res.status(404).json({ success: false, message: `User not found: ${userId}` });
-        }
-      }
+    // Update task fields
+    const updateData = {
+      ...(title && { title }),
+      ...(description !== undefined && { description }),
+      ...(client && { client }),
+      ...(subCompany !== undefined && { subCompany }),
+      ...(chosenServices !== undefined && { chosenServices }),
+      ...(assignedTo !== undefined && { assignedTo }),
+      ...(priority && { priority }),
+      ...(status && { status }),
+      ...(deadline !== undefined && { deadline }),
+      ...(attachments !== undefined && { attachments }),
+    };
 
-      const oldAssigned = task.assignedTo.map(id => id.toString());
-      const newAssigned = updates.assignedTo;
-
-      const removed = oldAssigned.filter(u => !newAssigned.includes(u));
-      const added = newAssigned.filter(u => !oldAssigned.includes(u));
-
-      // 🗑️ Remove TaskAssignment for removed users
-      if (removed.length > 0) {
-        await TaskAssignment.deleteMany({ task: id, user: { $in: removed } });
-      }
-
-      // 🆕 Add TaskAssignment for newly added users
-      if (added.length > 0) {
-        const assignments = added.map(userId => ({
-          task: id,
-          user: userId,
-          status: "not_started",
-          logs: [
-            {
-              action: "Task assigned",
-              by: req.user?._id || null,
-              at: new Date(),
-            },
-          ],
-        }));
-        await TaskAssignment.insertMany(assignments);
-      }
-
-      task.assignedTo = updates.assignedTo;
-    }
-
-    // 📝 Update allowed fields
-    const allowedFields = [
-      "title",
-      "description",
-      "priority",
-      "status",
-      "deadline",
-      "attachments",
-      "comments",
-    ];
-
-    for (const key of Object.keys(updates)) {
-      if (allowedFields.includes(key)) {
-        task[key] = updates[key];
-      }
-    }
-
-    // 🪵 Log update
-    task.logs.push({
+    // Add update log
+    const updateLog = {
       action: "Task updated",
       by: req.user?._id || null,
       at: new Date(),
-      extra: updates,
-    });
+      extra: {
+        updatedFields: Object.keys(updateData)
+      }
+    };
 
-    await task.save();
+    const updatedTask = await Task.findByIdAndUpdate(
+      id,
+      {
+        ...updateData,
+        $push: { logs: updateLog }
+      },
+      { new: true, runValidators: true }
+    )
+      .populate('client', 'name email phone businessName meta')
+      .populate('assignedTo', 'fullName email')
+      .populate('createdBy', 'fullName email');
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Task updated successfully",
-      data: task,
+      data: updatedTask,
     });
   } catch (err) {
     console.error("Error updating task:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
 
 
 export const deleteTask = async (req, res) => {
@@ -240,19 +232,30 @@ export const getAllTasks = async (req, res) => {
     if (search) filter.title = { $regex: search, $options: "i" };
 
     let query = Task.find(filter)
-      .populate("client", "name")
+      .populate("client", "name clientId")
       .populate("subCompany", "name")
       .populate("assignedTo", "fullName email")
       .populate("createdBy", "fullName email")
       .sort({ createdAt: -1 });
 
+
+      
     // Optional: add limit
     if (limit) query = query.limit(Number(limit));
 
     const tasks = await query;
 
     // 🆕 ENHANCEMENT: If user is requesting their own tasks, include assignment data
-    let enhancedTasks = tasks;
+    let enhancedTasks = await Promise.all(
+  tasks.map(async (task) => {
+    const assignments = await TaskAssignment.find({ task: task._id })
+      .populate("user", "fullName email avatarUrl");
+
+    const taskObj = task.toObject();
+    taskObj.assignments = assignments;
+    return taskObj;
+  })
+);
     
     if (assignedTo === "me" || req.query.includeAssignment === "true") {
       enhancedTasks = await Promise.all(
@@ -362,6 +365,60 @@ export const updateTaskProgress = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+// UPDATE TASK STATUS (TEAM MEMBER)
+export const updateTaskStatus = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { status } = req.body;
+    const userId = req.user._id;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required",
+      });
+    }
+
+    // find assignment of this user for this task
+    const assignment = await TaskAssignment.findOne({
+      task: taskId,
+      user: userId,
+    });
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: "Task assignment not found for this user",
+      });
+    }
+
+    assignment.status = status;
+
+    assignment.logs.push({
+      action: "Status updated",
+      by: userId,
+      at: new Date(),
+      extra: { status },
+    });
+
+    await assignment.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Status updated successfully",
+      data: assignment,
+    });
+
+  } catch (err) {
+    console.log("Error updating status:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
 // 🆕 ALTERNATIVE: More robust version of getMyTasks
 // TEMPORARY FIX for getMyTasks
 export const getMyTasks = async (req, res) => {

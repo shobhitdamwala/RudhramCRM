@@ -26,7 +26,17 @@ const leadSchema = new mongoose.Schema(
     businessName: { type: String },
     businessCategory: { type: String },
     subCompanyIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "SubCompany" }],
-    chosenServices: [{ type: String }],
+    chosenServices: [
+    {
+      subCompanyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'SubCompany', 
+        required: true
+      },
+      title: { type: String, required: true },
+      selectedOfferings: [{ type: String, required: true }]
+    }
+  ],
 
     // ✅ Optional date fields
     birthDate: { type: Date },

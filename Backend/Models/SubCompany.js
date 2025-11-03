@@ -16,6 +16,14 @@ const SubCompanySchema = new mongoose.Schema({
   name: { type: String, required: true, unique: true }, // e.g. "Aghhori"
   description: { type: String },
   logoUrl: { type: String },
+
+    // Unique prefix for invoices (e.g., AGH, DMR)
+  prefix: { type: String, required: true, uppercase: true },
+
+  // Running sequence for invoice numbering per sub-company
+  currentInvoiceCount: { type: Number, default: 0 },
+   currentClientCount: { type: Number, default: 0 },
+  
   // Format configurations
   invoiceFormat: { type: FormatSchema },
   receiptFormat: { type: FormatSchema },
