@@ -369,53 +369,99 @@ class _TeamMemberDetailsScreenState extends State<TeamMemberDetailsScreen> {
     );
   }
 
-  Widget _buildChip(
-    String? name,
-    String? logoUrl,
-    bool selected,
-    bool isActive,
-  ) {
-    final img = _absImage(logoUrl);
+Widget _buildChip(
+  String? name,
+  String? logoUrl,
+  bool selected,
+  bool isActive,
+) {
+  final img = _absImage(logoUrl);
 
-    return SizedBox(
-      width: 50,
-      child: Column(
-        children: [
-          CircleAvatar(
-            radius: 25,
-            backgroundColor: isActive
-                ? (selected ? Colors.brown : Colors.brown[200]!)
-                : Colors.grey[400]!,
-            backgroundImage: img.isNotEmpty ? NetworkImage(img) : null,
-            child: img.isEmpty
-                ? Text(
-                    name != null && name.isNotEmpty
-                        ? name[0].toUpperCase()
-                        : '',
-                    style: TextStyle(
-                      color: isActive ? Colors.white : Colors.grey[200],
-                      fontWeight: FontWeight.bold,
+  final Color ring        = Colors.brown;
+  final Color ringIdle    = Colors.brown.shade200;
+  final Color ringDisabled= Colors.grey.shade400;
+
+  return SizedBox(
+    width: 50,
+    child: Column(
+      children: [
+        // ---- Circular avatar with visible selection ring (no check) ----
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white, // white canvas behind image
+            border: Border.all(
+              color: !isActive
+                  ? ringDisabled
+                  : (selected ? ring : ringIdle),
+              width: selected ? 2 : 1.2,
+            ),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: ring.withOpacity(0.22),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
                     ),
-                  )
-                : null,
+                  ]
+                : [],
           ),
-          const SizedBox(height: 4),
-          Text(
-            name ?? '',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: isActive
-                  ? (selected ? Colors.brown : Colors.black)
-                  : Colors.grey,
+          // Keep a little padding so the ring is visible even with full images
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: ClipOval(
+              child: img.isNotEmpty
+                  ? Image.network(
+                      img,
+                      fit: BoxFit.contain, // ✅ shows square logos nicely inside circle
+                      errorBuilder: (_, __, ___) => Container(
+                        color: Colors.brown.shade50,
+                        alignment: Alignment.center,
+                        child: Text(
+                          (name ?? '').isNotEmpty ? name![0].toUpperCase() : '',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.brown,
+                          ),
+                        ),
+                      ),
+                    )
+                  : Container(
+                      color: Colors.brown.shade50,
+                      alignment: Alignment.center,
+                      child: Text(
+                        (name ?? '').isNotEmpty ? name![0].toUpperCase() : '',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.brown,
+                        ),
+                      ),
+                    ),
             ),
           ),
-        ],
-      ),
-    );
-  }
+        ),
+
+        const SizedBox(height: 6),
+
+        // ---- Label ----
+        Text(
+          name ?? '',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+            color: !isActive ? Colors.grey : (selected ? Colors.brown : Colors.black87),
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _buildClientStripOrSelected() {
     final sortedClients = _sortedClients;

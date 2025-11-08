@@ -26,6 +26,7 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
   List<Map<String, dynamic>> teamMembers = [];
   List<dynamic> allMeetings = [];
   List<dynamic> allTasks = [];
+  int _recentVisible = 3;
 
   // events grouped by yyyy-MM-dd
   Map<String, List<dynamic>> meetingsByDate = {};
@@ -35,6 +36,8 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
   bool isLoading = true;
   List<dynamic> recentTasks = [];
   List<dynamic> deadlineTasks = [];
+  
+
 
   @override
   void initState() {
@@ -61,6 +64,8 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
   Future<void> _loadAll() async {
     try {
       setState(() => isLoading = true);
+   
+
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
       if (token == null) {
@@ -218,8 +223,8 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                     if (a == null) continue;
                     if (a is String && a == myId) return true;
                     if (a is Map &&
-                        ((a['_id']?.toString() ?? a['id']?.toString()) ==
-                            myId)) return true;
+                        ((a['_id']?.toString() ?? a['id']?.toString()) == myId))
+                      return true;
                   }
                 }
                 return false;
@@ -268,55 +273,37 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
     }
   }
 
-  void _prepareRecentAndDeadlines() {
-    final sorted = List<dynamic>.from(allTasks);
-    sorted.sort((a, b) {
-      final aT = DateTime.tryParse(
-            a['updatedAt']?.toString() ?? a['createdAt']?.toString() ?? '',
-          ) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      final bT = DateTime.tryParse(
-            b['updatedAt']?.toString() ?? b['createdAt']?.toString() ?? '',
-          ) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      return bT.compareTo(aT);
-    });
-    recentTasks = sorted.take(5).toList();
+ void _prepareRecentAndDeadlines() {
+  // recent tasks (sorted newest first)
+  final sorted = List<dynamic>.from(allTasks);
+  sorted.sort((a, b) {
+    final aT = DateTime.tryParse(a['updatedAt']?.toString() ?? a['createdAt']?.toString() ?? '') ??
+        DateTime.fromMillisecondsSinceEpoch(0);
+    final bT = DateTime.tryParse(b['updatedAt']?.toString() ?? b['createdAt']?.toString() ?? '') ??
+        DateTime.fromMillisecondsSinceEpoch(0);
+    return bT.compareTo(aT);
+  });
 
-    final now = DateTime.now();
-    final upcoming = allTasks.where((t) {
-      try {
-        final d = DateTime.parse(t['deadline'].toString()).toLocal();
-        final diff = d.difference(now);
-        return diff.inDays >= 0 && diff.inDays <= 3;
-      } catch (_) {
-        return false;
-      }
-    }).toList();
+  recentTasks = sorted;                      // ← keep ALL
+  _recentVisible = recentTasks.isEmpty
+      ? 0
+      : (recentTasks.length < 3 ? recentTasks.length : 3); // reset to 3
 
-    if (mounted) setState(() => deadlineTasks = upcoming);
-
-    if (deadlineTasks.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        if (deadlineTasks.length == 1) {
-          SnackbarHelper.show(
-            context,
-            title: '⏰ Deadline Approaching',
-            message: '"${deadlineTasks.first['title']}" is due soon!',
-            type: ContentType.warning,
-          );
-        } else {
-          SnackbarHelper.show(
-            context,
-            title: '⏰ Multiple Deadlines',
-            message: 'You have ${deadlineTasks.length} tasks due soon!',
-            type: ContentType.warning,
-          );
-        }
-      });
+  // deadlines within 3 days (unchanged)
+  final now = DateTime.now();
+  final upcoming = allTasks.where((t) {
+    try {
+      final d = DateTime.parse(t['deadline'].toString()).toLocal();
+      final diff = d.difference(now);
+      return diff.inDays >= 0 && diff.inDays <= 3;
+    } catch (_) {
+      return false;
     }
-  }
+  }).toList();
+
+  if (mounted) setState(() => deadlineTasks = upcoming);
+}
+
 
   String _absUrl(String? maybeRelative) {
     if (maybeRelative == null || maybeRelative.isEmpty) return '';
@@ -333,12 +320,12 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
   }) async {
     try {
       final b = body is String ? jsonDecode(body) : body;
-      final msg =
-          (b?['message'] ?? b?['error'] ?? b?['msg'] ?? fallback).toString();
+      final msg = (b?['message'] ?? b?['error'] ?? b?['msg'] ?? fallback)
+          .toString();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.red),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -414,8 +401,10 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                 children: [
                   Container(
                     width: double.infinity,
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 16,
+                    ),
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [
@@ -442,8 +431,10 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                         ),
                         GestureDetector(
                           onTap: () => Navigator.pop(context),
-                          child: const Icon(Icons.close_rounded,
-                              color: Colors.white),
+                          child: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white,
+                          ),
                         ),
                       ],
                     ),
@@ -457,8 +448,10 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                         children: [
                           Row(
                             children: const [
-                              Icon(Icons.video_call_rounded,
-                                  color: Colors.brown),
+                              Icon(
+                                Icons.video_call_rounded,
+                                color: Colors.brown,
+                              ),
                               SizedBox(width: 8),
                               Text(
                                 'Meetings',
@@ -472,8 +465,10 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                           ),
                           const SizedBox(height: 8),
                           if (meetings.isEmpty)
-                            const Text('No meetings on this date',
-                                style: TextStyle(color: Colors.grey))
+                            const Text(
+                              'No meetings on this date',
+                              style: TextStyle(color: Colors.grey),
+                            )
                           else
                             ...meetings.map((m) {
                               final title = m['title'] ?? m['agenda'] ?? '-';
@@ -482,15 +477,17 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                               final timeLabel = (start != null && end != null)
                                   ? '${DateFormat('h:mm a').format(start)} — ${DateFormat('h:mm a').format(end)}'
                                   : '';
-                              final participants =
-                                  List<dynamic>.from(m['participants'] ?? []);
+                              final participants = List<dynamic>.from(
+                                m['participants'] ?? [],
+                              );
                               return Container(
                                 margin: const EdgeInsets.only(bottom: 10),
                                 decoration: BoxDecoration(
                                   color: Colors.white,
                                   borderRadius: BorderRadius.circular(12),
-                                  border:
-                                      Border.all(color: Colors.grey.shade200),
+                                  border: Border.all(
+                                    color: Colors.grey.shade200,
+                                  ),
                                   boxShadow: [
                                     BoxShadow(
                                       color: Colors.black.withOpacity(0.04),
@@ -501,11 +498,15 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                                 ),
                                 child: ListTile(
                                   contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 8),
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
                                   leading: CircleAvatar(
                                     backgroundColor: AppColors.primaryColor,
-                                    child: const Icon(Icons.event_note,
-                                        color: Colors.white),
+                                    child: const Icon(
+                                      Icons.event_note,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                   title: Text(
                                     title,
@@ -519,15 +520,19 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       if (timeLabel.isNotEmpty)
-                                        Text(timeLabel,
-                                            style: const TextStyle(
-                                                color: Colors.black54)),
+                                        Text(
+                                          timeLabel,
+                                          style: const TextStyle(
+                                            color: Colors.black54,
+                                          ),
+                                        ),
                                       const SizedBox(height: 4),
                                       Text(
                                         'Participants: ${participants.map((p) => _memberNameFrom(p)).join(', ')}',
                                         style: const TextStyle(
-                                            color: Colors.black54,
-                                            fontSize: 12),
+                                          color: Colors.black54,
+                                          fontSize: 12,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -537,8 +542,8 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                                       Navigator.push(
                                         context,
                                         MaterialPageRoute(
-                                          builder: (_) => MeetingDetailsScreen(
-                                              meeting: m),
+                                          builder: (_) =>
+                                              MeetingDetailsScreen(meeting: m),
                                         ),
                                       );
                                     },
@@ -573,50 +578,53 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                           ),
                           const SizedBox(height: 8),
                           if (tasks.isEmpty)
-                            const Text('No tasks on this date',
-                                style: TextStyle(color: Colors.grey))
+                            const Text(
+                              'No tasks on this date',
+                              style: TextStyle(color: Colors.grey),
+                            )
                           else
                             ...tasks.map((t) {
                               final title = t['title'] ?? '-';
                               final desc = (t['description'] ?? '').toString();
                               final status = t['status'] ?? '';
                               final priority = t['priority'] ?? '';
-                              final myId =
-                                  (userData?['_id'] ?? userData?['id'])
-                                      ?.toString();
+                              final myId = (userData?['_id'] ?? userData?['id'])
+                                  ?.toString();
                               final chosen = List<dynamic>.from(
-                                  t['chosenServices'] ?? []);
+                                t['chosenServices'] ?? [],
+                              );
                               final assignedServicesForMe =
                                   (myId != null && myId.isNotEmpty)
-                                      ? chosen.where((s) {
-                                          final at = List<dynamic>.from(
-                                            s['assignedTeamMembers'] ??
-                                                s['assignedTo'] ??
-                                                [],
-                                          );
-                                          for (var a in at) {
-                                            if (a == null) continue;
-                                            if (a is String && a == myId) {
-                                              return true;
-                                            }
-                                            if (a is Map &&
-                                                ((a['_id']?.toString() ??
-                                                        a['id']?.toString()) ==
-                                                    myId)) {
-                                              return true;
-                                            }
-                                          }
-                                          return false;
-                                        }).toList()
-                                      : chosen;
+                                  ? chosen.where((s) {
+                                      final at = List<dynamic>.from(
+                                        s['assignedTeamMembers'] ??
+                                            s['assignedTo'] ??
+                                            [],
+                                      );
+                                      for (var a in at) {
+                                        if (a == null) continue;
+                                        if (a is String && a == myId) {
+                                          return true;
+                                        }
+                                        if (a is Map &&
+                                            ((a['_id']?.toString() ??
+                                                    a['id']?.toString()) ==
+                                                myId)) {
+                                          return true;
+                                        }
+                                      }
+                                      return false;
+                                    }).toList()
+                                  : chosen;
 
                               return Container(
                                 margin: const EdgeInsets.only(bottom: 10),
                                 decoration: BoxDecoration(
                                   color: Colors.white,
                                   borderRadius: BorderRadius.circular(12),
-                                  border:
-                                      Border.all(color: Colors.grey.shade200),
+                                  border: Border.all(
+                                    color: Colors.grey.shade200,
+                                  ),
                                   boxShadow: [
                                     BoxShadow(
                                       color: Colors.black.withOpacity(0.04),
@@ -627,11 +635,15 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                                 ),
                                 child: ListTile(
                                   contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 8),
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
                                   leading: CircleAvatar(
                                     backgroundColor: AppColors.primaryColor,
-                                    child: const Icon(Icons.assignment,
-                                        color: Colors.white),
+                                    child: const Icon(
+                                      Icons.assignment,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                   title: Text(
                                     title,
@@ -649,7 +661,8 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                                         maxLines: 2,
                                         overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(
-                                            color: Colors.black54),
+                                          color: Colors.black54,
+                                        ),
                                       ),
                                       const SizedBox(height: 6),
                                       Text(
@@ -667,15 +680,19 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                                           runSpacing: 6,
                                           children: assignedServicesForMe
                                               .map<Widget>((s) {
-                                            final stitle = s['title'] ??
-                                                s['serviceTitle'] ??
-                                                '-';
-                                            return Chip(
-                                              label: Text(stitle.toString()),
-                                              backgroundColor:
-                                                  Colors.grey[100],
-                                            );
-                                          }).toList(),
+                                                final stitle =
+                                                    s['title'] ??
+                                                    s['serviceTitle'] ??
+                                                    '-';
+                                                return Chip(
+                                                  label: Text(
+                                                    stitle.toString(),
+                                                  ),
+                                                  backgroundColor:
+                                                      Colors.grey[100],
+                                                );
+                                              })
+                                              .toList(),
                                         ),
                                     ],
                                   ),
@@ -693,7 +710,8 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                                     },
                                     style: OutlinedButton.styleFrom(
                                       side: BorderSide(
-                                          color: AppColors.primaryColor),
+                                        color: AppColors.primaryColor,
+                                      ),
                                       foregroundColor: AppColors.primaryColor,
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(8),
@@ -745,21 +763,21 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
 
     final screenW = MediaQuery.of(context).size.width;
     final isWide = screenW >= 720;
-    final cellH = isWide ? 72.0 : 64.0;
+    final cellH = isWide ? 72.0 : 68.0;
 
     Widget weekdayLabel(String d) => Expanded(
-          child: Center(
-            child: Text(
-              d,
-              style: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFF8A7E72),
-                letterSpacing: .2,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
+      child: Center(
+        child: Text(
+          d,
+          style: const TextStyle(
+            fontSize: 12,
+            color: Color(0xFF8A7E72),
+            letterSpacing: .2,
+            fontWeight: FontWeight.w700,
           ),
-        );
+        ),
+      ),
+    );
 
     // Header
     Widget header = Container(
@@ -813,8 +831,7 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
             },
             style: TextButton.styleFrom(
               foregroundColor: AppColors.primaryColor,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
                 side: BorderSide(
@@ -861,7 +878,7 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
               'Wed',
               'Thu',
               'Fri',
-              'Sat'
+              'Sat',
             ].map((d) => weekdayLabel(d)).toList(),
           ),
           const SizedBox(height: 6),
@@ -893,8 +910,7 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                         dayNumber,
                       );
                       final key = DateFormat('yyyy-MM-dd').format(date);
-                      final hasMeeting =
-                          (meetingsByDate[key] ?? []).isNotEmpty;
+                      final hasMeeting = (meetingsByDate[key] ?? []).isNotEmpty;
                       final hasTask = (tasksByDate[key] ?? []).isNotEmpty;
                       final isToday = isSameDay(date, now);
 
@@ -954,63 +970,96 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
     );
   }
 
-  Widget _buildRecentActivity() {
-    if (recentTasks.isEmpty) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Recent Tasks',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: Colors.brown,
+ Widget _buildRecentActivity() {
+  if (recentTasks.isEmpty) return const SizedBox.shrink();
+
+  final visible = recentTasks.take(_recentVisible).toList();
+  final canShowMore = _recentVisible < recentTasks.length;
+  final canShowLess = recentTasks.length > 3 && !canShowMore; // fully expanded
+
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        'Recent Tasks',
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+          color: Colors.brown,
+        ),
+      ),
+      const SizedBox(height: 8),
+
+      // render only visible tasks
+      ...visible.map((t) {
+        final title = t['title'] ?? '-';
+        final status = t['status'] ?? '';
+        final progress = t['progress'] ?? 0;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: ListTile(
+            leading: CircleAvatar(
+              backgroundColor: AppColors.primaryColor,
+              child: const Icon(Icons.assignment, color: Colors.white),
+            ),
+            title: Text(
+              title,
+              style: const TextStyle(
+                color: Colors.brown,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            subtitle: Text('Status: $status • $progress%'),
+            onTap: () {
+              DateTime? d;
+              try {
+                d = DateTime.parse(t['deadline'].toString()).toLocal();
+              } catch (_) {}
+              if (d != null) _showDateDetails(d);
+            },
+          ),
+        );
+      }),
+
+      // controls
+      if (canShowMore || canShowLess) ...[
+        const SizedBox(height: 4),
+        Center(
+          child: TextButton(
+            onPressed: () {
+              setState(() {
+                if (canShowMore) {
+                  _recentVisible =
+                      (_recentVisible + 5).clamp(0, recentTasks.length);
+                } else {
+                  _recentVisible = 3; // collapse back to first 3
+                }
+              });
+            },
+            child: Text(
+              canShowMore ? 'View more' : 'View less',
+              style: TextStyle(
+                color: AppColors.primaryColor,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
         ),
-        const SizedBox(height: 8),
-        ...recentTasks.map((t) {
-          final title = t['title'] ?? '-';
-          final status = t['status'] ?? '';
-          final progress = t['progress'] ?? 0;
-          return Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: AppColors.primaryColor,
-                child: const Icon(Icons.assignment, color: Colors.white),
-              ),
-              title: Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.brown,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              subtitle: Text('Status: $status • $progress%'),
-              onTap: () {
-                DateTime? d;
-                try {
-                  d = DateTime.parse(t['deadline'].toString()).toLocal();
-                } catch (_) {}
-                if (d != null) _showDateDetails(d);
-              },
-            ),
-          );
-        }).toList(),
       ],
-    );
-  }
+    ],
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -1057,8 +1106,9 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                                   borderRadius: BorderRadius.circular(12),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: AppColors.primaryColor
-                                          .withOpacity(0.12),
+                                      color: AppColors.primaryColor.withOpacity(
+                                        0.12,
+                                      ),
                                       blurRadius: 8,
                                       offset: const Offset(0, 4),
                                     ),
@@ -1083,8 +1133,10 @@ class _TeamMemberDashboardState extends State<TeamMemberDashboard> {
                                     IconButton(
                                       onPressed: () =>
                                           setState(() => deadlineTasks = []),
-                                      icon: const Icon(Icons.close,
-                                          color: Colors.white),
+                                      icon: const Icon(
+                                        Icons.close,
+                                        color: Colors.white,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -1162,7 +1214,8 @@ class _DayCell extends StatefulWidget {
   State<_DayCell> createState() => _DayCellState();
 }
 
-class _DayCellState extends State<_DayCell> with SingleTickerProviderStateMixin {
+class _DayCellState extends State<_DayCell>
+    with SingleTickerProviderStateMixin {
   double _scale = 1.0;
 
   @override
@@ -1183,13 +1236,14 @@ class _DayCellState extends State<_DayCell> with SingleTickerProviderStateMixin 
           height: widget.height,
           // reduced horizontal margin -> avoids overflow in 7 columns
           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+          padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 6),
           decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 '${widget.dayNumber}',
@@ -1198,23 +1252,28 @@ class _DayCellState extends State<_DayCell> with SingleTickerProviderStateMixin 
                   color: widget.isToday
                       ? AppColors.primaryColor
                       : const Color(0xFF6E594A),
-                  fontWeight:
-                      widget.isToday ? FontWeight.w800 : FontWeight.w600,
+                  fontWeight: widget.isToday
+                      ? FontWeight.w800
+                      : FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 6),
-              // Wrap prevents tiny overflow on narrow phones
-              Wrap(
-                alignment: WrapAlignment.center,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 6,
-                runSpacing: 2,
-                children: [
-                  if (widget.hasMeeting)
-                    _badge(count: widget.meetingsCount, color: Colors.red),
-                  if (widget.hasTask)
-                    _badge(count: widget.tasksCount, color: Colors.blue),
-                ],
+              const SizedBox(height: 4), // was 6
+              // This makes the badges shrink if needed so no overflow happens
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (widget.hasMeeting)
+                        _badge(count: widget.meetingsCount, color: Colors.red),
+                      if (widget.hasMeeting && widget.hasTask)
+                        const SizedBox(width: 6),
+                      if (widget.hasTask)
+                        _badge(count: widget.tasksCount, color: Colors.blue),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
@@ -1228,9 +1287,12 @@ class _DayCellState extends State<_DayCell> with SingleTickerProviderStateMixin 
       opacity: 1,
       duration: const Duration(milliseconds: 160),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 56),
+        constraints: const BoxConstraints(maxWidth: 56, maxHeight: 20),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 6,
+            vertical: 1.5,
+          ), // was 2
           decoration: BoxDecoration(
             color: color.withOpacity(.12),
             borderRadius: BorderRadius.circular(20),
@@ -1240,21 +1302,18 @@ class _DayCellState extends State<_DayCell> with SingleTickerProviderStateMixin 
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 7,
-                height: 7,
-                decoration:
-                    BoxDecoration(color: color, shape: BoxShape.circle),
+                width: 6.5,
+                height: 6.5, // slightly smaller dot
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
               ),
               const SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  '$count',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    color: _darken(color),
-                    fontWeight: FontWeight.w700,
-                  ),
+              Text(
+                '$count',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10, // was 10.5
+                  color: _darken(color),
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ],

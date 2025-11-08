@@ -15,7 +15,6 @@ import '../utils/snackbar_helper.dart';
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
 import 'package:share_plus/share_plus.dart';
 
-
 /// ------------------------------
 /// MEETING SCREEN (List + CRUD)
 /// ------------------------------
@@ -85,6 +84,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
       }
     } catch (_) {}
   }
+
   Future<void> fetchMeetings() async {
     setState(() => isLoading = true);
     try {
@@ -167,7 +167,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -175,16 +174,16 @@ class _MeetingScreenState extends State<MeetingScreen> {
         child: SafeArea(
           child: Column(
             children: [
-             ProfileHeader(
-                    avatarUrl: userData?['avatarUrl'],
-                    fullName: userData?['fullName'],
-                    role: formatUserRole(userData?['role']),
-                    showBackButton: true,
-                    onBack: () => Navigator.pop(context),
-                    onNotification: () {
-                      print("🔔 Notification tapped");
-                    },
-                  ),
+              ProfileHeader(
+                avatarUrl: userData?['avatarUrl'],
+                fullName: userData?['fullName'],
+                role: formatUserRole(userData?['role']),
+                showBackButton: true,
+                onBack: () => Navigator.pop(context),
+                onNotification: () {
+                  print("🔔 Notification tapped");
+                },
+              ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
                 child: Row(
@@ -258,7 +257,11 @@ class _MeetingScreenState extends State<MeetingScreen> {
               ),
               // Bottom spacing so it never clashes with system navbar
               const SizedBox(height: 6),
-              CustomBottomNavBar(currentIndex: _currentIndex, onTap: (i) {},userRole: userData?['role'] ?? '',),
+              CustomBottomNavBar(
+                currentIndex: _currentIndex,
+                onTap: (i) {},
+                userRole: userData?['role'] ?? '',
+              ),
             ],
           ),
         ),
@@ -580,14 +583,29 @@ class _AddEditMeetingScreenState extends State<AddEditMeetingScreen> {
   Future<void> _fetchTeamMembers() async {
     final prefs = await SharedPreferences.getInstance();
     final token = _cleanToken(prefs.getString('auth_token'));
+
     final res = await http.get(
-      Uri.parse("${ApiConfig.baseUrl}/user/team-members"),
+      Uri.parse("${ApiConfig.baseUrl}/user/users"), // ⬅️ use /user/users
       headers: {"Authorization": "Bearer $token"},
     );
+
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body);
-      setState(
-        () => teamMembers = List<dynamic>.from(data['teamMembers'] ?? []),
+
+      // Be flexible with possible response shapes:
+      // { users: [...] } or { data: [...] } or direct array
+      final list = (data is List)
+          ? data
+          : (data['users'] ?? data['data'] ?? []);
+
+      setState(() => teamMembers = List<dynamic>.from(list));
+    } else {
+      // Optional: show a small warning if needed
+      SnackbarHelper.show(
+        context,
+        title: 'Warning',
+        message: 'Could not load users',
+        type: ContentType.warning,
       );
     }
   }

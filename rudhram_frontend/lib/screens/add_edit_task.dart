@@ -40,6 +40,13 @@ class _AddEditTaskScreenState extends State<AddEditTaskScreen> {
   bool isLoading = false;
   bool isEditing = false;
 
+  String _absUrl(String? p) {
+    if (p == null || p.isEmpty) return '';
+    if (p.startsWith('http')) return p;
+    if (p.startsWith('/uploads')) return "${ApiConfig.imageBaseUrl}$p";
+    return "${ApiConfig.baseUrl}$p";
+  }
+
   @override
   void initState() {
     super.initState();
@@ -181,23 +188,48 @@ class _AddEditTaskScreenState extends State<AddEditTaskScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = _cleanToken(prefs.getString('auth_token'));
+
       final res = await http.get(
-        Uri.parse("${ApiConfig.baseUrl}/user/team-members"),
+        Uri.parse("${ApiConfig.baseUrl}/user/users"),
         headers: {"Authorization": "Bearer $token"},
       );
 
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        final raw = List<dynamic>.from(data['teamMembers'] ?? []);
-        teamMembers = raw
-            .map<Map<String, dynamic>>(
-              (m) => Map<String, dynamic>.from(m as Map),
-            )
-            .toList();
-        if (mounted) setState(() {});
+      if (res.statusCode != 200) {
+        if (!mounted) return;
+        setState(() => teamMembers = const []);
+        return;
       }
+
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final List<dynamic> raw = List<dynamic>.from(body['data'] ?? []);
+
+      // Keep TEAM_MEMBER + ADMIN; exclude SUPER_ADMIN (and anything else)
+      final filtered = raw
+          .where((u) {
+            final role = (u is Map && u['role'] != null)
+                ? u['role'].toString().toUpperCase()
+                : '';
+            return role == 'TEAM_MEMBER' || role == 'ADMIN';
+          })
+          .map<Map<String, dynamic>>((u) {
+            final m = Map<String, dynamic>.from(u as Map);
+            // normalize avatar
+            m['avatarUrl'] = _absUrl((m['avatarUrl'] ?? '').toString());
+            // precompute display name: add (Admin) suffix for admins
+            final name = (m['fullName'] ?? m['name'] ?? 'Unnamed').toString();
+            final role = (m['role'] ?? '').toString().toUpperCase();
+            m['displayName'] = role == 'ADMIN' ? "$name (Admin)" : name;
+            return m;
+          })
+          .toList();
+
+      if (!mounted) return;
+      setState(() {
+        teamMembers = filtered;
+      });
     } catch (e) {
-      // ignore
+      if (!mounted) return;
+      setState(() => teamMembers = const []);
     }
   }
 
@@ -366,7 +398,7 @@ class _AddEditTaskScreenState extends State<AddEditTaskScreen> {
                                   .toString();
                           final selected = tempSelected.contains(id);
                           return CheckboxListTile(
-                            title: Text(name),
+                            title: Text((tm['displayName'] ?? name).toString()),
                             value: selected,
                             onChanged: (v) {
                               setModalState(() {
@@ -737,9 +769,12 @@ class _AddEditTaskScreenState extends State<AddEditTaskScreen> {
                         );
                         return FilterChip(
                           label: Text(
-                            tm['fullName']?.toString() ??
-                                tm['name']?.toString() ??
-                                'Unnamed',
+                            (tm['displayName'] ??
+                                    tm['fullName'] ??
+                                    tm['name'] ??
+                                    'Unnamed')
+                                .toString(),
+                                
                             style: TextStyle(
                               color: isMemberSelected
                                   ? Colors.white

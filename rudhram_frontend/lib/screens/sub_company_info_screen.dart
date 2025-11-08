@@ -880,9 +880,9 @@ import '../utils/api_config.dart';
 
 class SubCompanyInfoScreen extends StatefulWidget {
   final String subCompanyId;
-  
+
   const SubCompanyInfoScreen({Key? key, required this.subCompanyId})
-    : super(key: key);
+      : super(key: key);
 
   @override
   State<SubCompanyInfoScreen> createState() => _SubCompanyInfoScreenState();
@@ -893,11 +893,11 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
   String? _error;
 
   Map<String, dynamic>? _subCompany;
-  List<dynamic> _clients = [];
+  List<Map<String, dynamic>> _clients = [];
   Map<String, dynamic>? userData;
   int? _selectedClientIndex;
 
-  // 🆕 Track only assigned clients
+  // Track only assigned clients (enable/disable chips)
   Set<String> _assignedClientIds = {};
 
   @override
@@ -905,6 +905,82 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
     super.initState();
     _fetchDetails();
   }
+
+  // ---------- Helpers ---------------------------------------------------------
+
+  String _absUrl(String? p) {
+    if (p == null || p.isEmpty) return '';
+    if (p.startsWith('http')) return p;
+    if (p.startsWith('/uploads')) return "${ApiConfig.imageBaseUrl}$p";
+    return "${ApiConfig.baseUrl}$p";
+  }
+
+  // Small reusable widget: circular logo with padding + contain
+  Widget _circleLogo({
+    required double size,
+    required String titleFallback, // used for first letter fallback
+    required String? logoUrl,
+    EdgeInsets padding = const EdgeInsets.all(6),
+    Color bg = Colors.white,
+    Color placeholderBg = const Color(0xFFFFF3E9),
+    TextStyle? textStyle,
+    List<BoxShadow>? shadows,
+    bool showShadow = true,
+  }) {
+    final String url = (logoUrl ?? '').toString();
+    final bool hasLogo = url.isNotEmpty;
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: bg,
+        boxShadow: showShadow
+            ? (shadows ??
+                [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.06),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ])
+            : null,
+      ),
+      child: Padding(
+        padding: padding,
+        child: ClipOval(
+          child: hasLogo
+              ? Image.network(
+                  url,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => Container(
+                    color: placeholderBg,
+                    alignment: Alignment.center,
+                    child: const Icon(Icons.image_not_supported, color: Colors.grey),
+                  ),
+                )
+              : Container(
+                  color: placeholderBg,
+                  alignment: Alignment.center,
+                  child: Text(
+                    titleFallback.isNotEmpty
+                        ? titleFallback[0].toUpperCase()
+                        : '',
+                    style: textStyle ??
+                        const TextStyle(
+                          color: Colors.brown,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                        ),
+                  ),
+                ),
+        ),
+      ),
+    );
+  }
+
+  // ---------- API -------------------------------------------------------------
 
   Future<void> _fetchDetails() async {
     setState(() {
@@ -919,6 +995,7 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
       final url = Uri.parse(
         "${ApiConfig.baseUrl}/subcompany/${widget.subCompanyId}/details",
       );
+
       final res = await http.get(
         url,
         headers: {
@@ -936,20 +1013,32 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
       }
 
       final body = jsonDecode(res.body) as Map<String, dynamic>;
-      final clients = List.from(body['clients'] ?? []);
 
-      // 🆕 Build assigned client set (if needed, use field like isAssigned or validate through API)
-      _assignedClientIds = clients
+      // Normalize subcompany (ensure map + absolute logo)
+      final scRaw = Map<String, dynamic>.from(body['subCompany'] ?? {});
+      scRaw['logoUrl'] = _absUrl((scRaw['logoUrl'] ?? '').toString());
+
+      // Normalize clients (ensure list of maps + absolute logos)
+      final clientsRaw = List<Map<String, dynamic>>.from(
+        (body['clients'] ?? const []) as List,
+      ).map((c) {
+        final m = Map<String, dynamic>.from(c);
+        m['logoUrl'] = _absUrl((m['logoUrl'] ?? '').toString());
+        return m;
+      }).toList();
+
+      // (Optional) build assigned set from clients present in the list
+      _assignedClientIds = clientsRaw
           .map((c) => (c['_id'] ?? c['id'] ?? '').toString())
           .where((id) => id.isNotEmpty)
           .toSet();
 
       setState(() {
-        _subCompany = body['subCompany'] as Map<String, dynamic>?;
-        _clients = clients;
+        _subCompany = scRaw;
+        _clients = clientsRaw;
         _loading = false;
       });
-    } catch (e) {
+    } catch (_) {
       setState(() {
         _error = "Something went wrong.";
         _loading = false;
@@ -957,12 +1046,14 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
     }
   }
 
+  // ---------- Derived ---------------------------------------------------------
+
   Map<String, dynamic>? get _selectedClient =>
       (_selectedClientIndex != null &&
-          _selectedClientIndex! >= 0 &&
-          _selectedClientIndex! < _clients.length)
-      ? _clients[_selectedClientIndex!] as Map<String, dynamic>
-      : null;
+              _selectedClientIndex! >= 0 &&
+              _selectedClientIndex! < _clients.length)
+          ? _clients[_selectedClientIndex!]
+          : null;
 
   List<Map<String, dynamic>> _teamForSelectedClient() {
     final client = _selectedClient;
@@ -971,21 +1062,20 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
 
     final Map<String, Map<String, dynamic>> byUser = {};
     for (final t in tasks) {
-      final assignees = (t['assignedTo'] ?? []) as List<dynamic>;
+      final assignees = (t is Map ? (t['assignedTo'] ?? []) : []) as List<dynamic>;
       for (final a in assignees) {
-        final userId = (a['userId'] ?? '').toString();
+        final am = a is Map ? a : {};
+        final userId = (am['userId'] ?? '').toString();
         if (userId.isEmpty) continue;
         final prev = byUser[userId];
-        final int progress = (a['progress'] is num)
-            ? (a['progress'] as num).toInt()
-            : 0;
+        final int progress = (am['progress'] is num) ? (am['progress'] as num).toInt() : 0;
         if (prev == null || progress > (prev['progress'] ?? 0)) {
           byUser[userId] = {
             'userId': userId,
-            'fullName': a['fullName'],
-            'avatarUrl': a['avatarUrl'],
+            'fullName': am['fullName'],
+            'avatarUrl': am['avatarUrl'],
             'progress': progress,
-            'assignmentStatus': a['assignmentStatus'],
+            'assignmentStatus': am['assignmentStatus'],
           };
         }
       }
@@ -994,13 +1084,15 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
   }
 
   Color _statusDot(String status) {
-    final s = (status).toLowerCase();
+    final s = status.toLowerCase();
     if (s.contains('done') || s.contains('complete')) return Colors.green;
     if (s.contains('progress') || s.contains('in_progress')) return Colors.blue;
     if (s.contains('block')) return Colors.red;
     if (s.contains('review')) return Colors.orange;
     return Colors.grey;
   }
+
+  // ---------- UI --------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -1014,64 +1106,69 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
                   child: CircularProgressIndicator(color: Colors.brown),
                 )
               : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(
-                      _error!,
-                      style: const TextStyle(color: Colors.red),
-                    ),
-                  ),
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 10),
-                    _buildHeader(),
-                    const SizedBox(height: 8),
-                    _buildClientStripOrSelected(),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        physics: const BouncingScrollPhysics(),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (_selectedClient != null) ...[
-                              const SizedBox(height: 10),
-                              _buildTeamStrip(),
-                              const SizedBox(height: 16),
-                              _buildFullWidthBox(
-                                child: _buildClientDetailsBoxContent(),
-                              ),
-                              const SizedBox(height: 16),
-                              _buildFullWidthBox(
-                                child: _buildServicesBoxContent(), // ⬅️ Upgraded UI
-                              ),
-                              const SizedBox(height: 16),
-                              _buildFullWidthBox(
-                                child: _buildWorkStatusBoxContent(),
-                              ),
-                              const SizedBox(height: 24),
-                            ] else ...[
-                              const SizedBox(height: 20),
-                              _buildSkeletonBox(),
-                              const SizedBox(height: 16),
-                              _buildSkeletonBox(),
-                              const SizedBox(height: 24),
-                            ],
-                          ],
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          _error!,
+                          style: const TextStyle(color: Colors.red),
                         ),
                       ),
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 10),
+                        _buildHeader(),
+                        const SizedBox(height: 8),
+                        _buildClientStripOrSelected(),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            physics: const BouncingScrollPhysics(),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (_selectedClient != null) ...[
+                                  const SizedBox(height: 10),
+                                  _buildTeamStrip(),
+                                  const SizedBox(height: 16),
+                                  _buildFullWidthBox(
+                                    child: _buildClientDetailsBoxContent(),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  _buildFullWidthBox(
+                                    child:
+                                        _buildServicesBoxContent(), // Upgraded UI
+                                  ),
+                                  const SizedBox(height: 16),
+                                  _buildFullWidthBox(
+                                    child: _buildWorkStatusBoxContent(),
+                                  ),
+                                  const SizedBox(height: 24),
+                                ] else ...[
+                                  const SizedBox(height: 20),
+                                  _buildSkeletonBox(),
+                                  const SizedBox(height: 16),
+                                  _buildSkeletonBox(),
+                                  const SizedBox(height: 24),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
         ),
       ),
       bottomNavigationBar: SafeArea(
         top: false,
         child: Padding(
           padding: const EdgeInsets.only(bottom: 5),
-          child: CustomBottomNavBar(currentIndex: 6, onTap: (index) {},userRole: userData?['role'] ?? '',),
+          child: CustomBottomNavBar(
+            currentIndex: 6,
+            onTap: (index) {},
+            userRole: userData?['role'] ?? '',
+          ),
         ),
       ),
     );
@@ -1081,27 +1178,19 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
     final sc = _subCompany;
     if (sc == null) return const SizedBox.shrink();
 
+    final name = (sc['name'] ?? '').toString();
+    final logo = (sc['logoUrl'] ?? '').toString();
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 25,
-            backgroundColor: Colors.brown[100],
-            backgroundImage:
-                (sc['logoUrl'] != null && (sc['logoUrl'] as String).isNotEmpty)
-                ? NetworkImage(sc['logoUrl'])
-                : null,
-            child: (sc['logoUrl'] == null || (sc['logoUrl'] as String).isEmpty)
-                ? Text(
-                    (sc['name'] ?? 'S')[0].toString().toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.brown,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 20,
-                    ),
-                  )
-                : null,
+          _circleLogo(
+            size: 50,
+            titleFallback: name.isNotEmpty ? name : 'S',
+            logoUrl: logo,
+            padding: const EdgeInsets.all(4),
+            bg: Colors.white,
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1109,7 +1198,7 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  sc['name'] ?? '',
+                  name,
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -1117,7 +1206,7 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
                   ),
                 ),
                 Text(
-                  sc['description'] ?? '',
+                  (sc['description'] ?? '').toString(),
                   style: const TextStyle(fontSize: 12, color: Colors.black87),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -1152,10 +1241,10 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
             separatorBuilder: (_, __) => const SizedBox(width: 8),
             itemCount: _clients.length,
             itemBuilder: (context, i) {
-              final client = _clients[i] as Map<String, dynamic>;
+              final client = _clients[i];
               final id = (client['_id'] ?? client['id'] ?? '').toString();
-              final name = (client['name'] ?? '') as String;
-              final logoUrl = client['logoUrl'] as String?;
+              final name = (client['name'] ?? '').toString();
+              final logoUrl = (client['logoUrl'] ?? '').toString();
               final isActive = _assignedClientIds.contains(id);
 
               return GestureDetector(
@@ -1169,22 +1258,12 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        CircleAvatar(
-                          radius: 25,
-                          backgroundColor: Colors.brown[200],
-                          backgroundImage:
-                              (logoUrl != null && logoUrl.isNotEmpty)
-                              ? NetworkImage(logoUrl)
-                              : null,
-                          child: (logoUrl == null || logoUrl.isEmpty)
-                              ? Text(
-                                  name.isNotEmpty ? name[0].toUpperCase() : '',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                  ),
-                                )
-                              : null,
+                        _circleLogo(
+                          size: 50,
+                          titleFallback: name,
+                          logoUrl: logoUrl,
+                          padding: const EdgeInsets.all(2),
+                          bg: Colors.white,
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -1208,8 +1287,9 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
       );
     } else {
       final client = _selectedClient!;
-      final name = (client['name'] ?? '') as String;
-      final logoUrl = client['logoUrl'] as String?;
+      final name = (client['name'] ?? '').toString();
+      final logoUrl = (client['logoUrl'] ?? '').toString();
+
       return GestureDetector(
         onTap: () => setState(() => _selectedClientIndex = null),
         child: Container(
@@ -1217,21 +1297,13 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
           color: Colors.brown.withOpacity(0.05),
           child: Row(
             children: [
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: Colors.brown[200],
-                backgroundImage: (logoUrl != null && logoUrl.isNotEmpty)
-                    ? NetworkImage(logoUrl)
-                    : null,
-                child: (logoUrl == null || logoUrl.isEmpty)
-                    ? Text(
-                        name.isNotEmpty ? name[0].toUpperCase() : '',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                        ),
-                      )
-                    : null,
+              _circleLogo(
+                size: 44,
+                titleFallback: name,
+                logoUrl: logoUrl,
+                padding: const EdgeInsets.all(2),
+                bg: Colors.white,
+                showShadow: false,
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -1287,8 +1359,8 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
           itemCount: members.length,
           itemBuilder: (context, i) {
             final m = members[i];
-            final name = (m['fullName'] ?? '') as String;
-            final avatar = (m['avatarUrl'] ?? '') as String;
+            final name = (m['fullName'] ?? '').toString();
+            final avatar = (m['avatarUrl'] ?? '').toString();
             final img = (avatar.isNotEmpty && !avatar.startsWith('http'))
                 ? "${ApiConfig.imageBaseUrl}$avatar"
                 : avatar;
@@ -1298,19 +1370,12 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircleAvatar(
-                    radius: 25,
-                    backgroundColor: Colors.brown[200],
-                    backgroundImage: img.isNotEmpty ? NetworkImage(img) : null,
-                    child: img.isEmpty
-                        ? Text(
-                            name.isNotEmpty ? name[0].toUpperCase() : '',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                            ),
-                          )
-                        : null,
+                  _circleLogo(
+                    size: 50,
+                    titleFallback: name,
+                    logoUrl: img,
+                    padding: const EdgeInsets.all(1),
+                    bg: Colors.white,
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -1351,7 +1416,8 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
     );
   }
 
-  // -------------------- UPGRADED SERVICES UI (UI ONLY) ----------------------
+  // -------------------- Services UI ------------------------------------------
+
   Widget _buildServicesBoxContent() {
     final c = _selectedClient!;
     final services = List.from(c['meta']?['chosenServices'] ?? []);
@@ -1368,7 +1434,6 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
           ),
         ),
         const SizedBox(height: 10),
-
         if (services.isEmpty)
           const Text(
             "No services assigned.",
@@ -1376,10 +1441,12 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
           )
         else
           ...List.generate(services.length, (index) {
-            final Map<String, dynamic> svc = Map<String, dynamic>.from(services[index]);
+            final Map<String, dynamic> svc =
+                Map<String, dynamic>.from(services[index]);
             final title = (svc['title'] ?? 'Untitled Service').toString();
             final offerings = List<String>.from(
-              (svc['offerings'] ?? svc['selectedOfferings'] ?? []).map((e) => e.toString()),
+              (svc['offerings'] ?? svc['selectedOfferings'] ?? [])
+                  .map((e) => e.toString()),
             );
             final showAll = svc['__showAll'] == true; // local UI flag
             final display = showAll ? offerings : offerings.take(6).toList();
@@ -1420,7 +1487,7 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header row with icon + title + offerings count
+                  // Header row
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
@@ -1447,7 +1514,8 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
                       ),
                       if (offerings.isNotEmpty)
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
                           decoration: BoxDecoration(
                             color: accent.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(20),
@@ -1475,7 +1543,8 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
                   if (offerings.isEmpty)
                     Text(
                       "No offerings",
-                      style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                      style: TextStyle(
+                          color: Colors.grey.shade600, fontSize: 12),
                     )
                   else
                     Wrap(
@@ -1483,7 +1552,8 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
                       runSpacing: 8,
                       children: display.map((o) {
                         return Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 8),
                           decoration: BoxDecoration(
                             color: accent.withOpacity(0.08),
                             borderRadius: BorderRadius.circular(10),
@@ -1516,13 +1586,14 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
                       child: TextButton.icon(
                         style: TextButton.styleFrom(
                           foregroundColor: accent,
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
                         ),
                         onPressed: () {
-                          // flip a local flag inside the list item map (UI only)
+                          // Flip a local flag inside the list item map (UI only)
                           setState(() {
                             services[index] = {
                               ...svc,
@@ -1530,7 +1601,9 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
                             };
                           });
                         },
-                        icon: Icon(showAll ? Icons.expand_less : Icons.expand_more, size: 18),
+                        icon: Icon(
+                            showAll ? Icons.expand_less : Icons.expand_more,
+                            size: 18),
                         label: Text(showAll ? "Show less" : "Show more"),
                       ),
                     ),
@@ -1542,7 +1615,8 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
       ],
     );
   }
-  // --------------------------------------------------------------------------
+
+  // -------------------- Work Status ------------------------------------------
 
   Widget _buildWorkStatusBoxContent() {
     final c = _selectedClient!;
@@ -1693,6 +1767,8 @@ class _SubCompanyInfoScreenState extends State<SubCompanyInfoScreen> {
       ],
     );
   }
+
+  // -------------------- Common Boxes / Skeleton ------------------------------
 
   Widget _buildSkeletonBox() {
     return Padding(

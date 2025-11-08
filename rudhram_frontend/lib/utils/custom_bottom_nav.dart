@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:rudhram_frontend/screens/completed_task_screen.dart';
+import 'package:rudhram_frontend/screens/message_center_screen.dart';
 import 'package:rudhram_frontend/screens/team_member_dashboard.dart';
+import 'package:rudhram_frontend/screens/team_member_message_screen.dart';
 import '../utils/constants.dart';
 import '../screens/home_screen.dart';
 import '../screens/task_screen.dart';
@@ -31,7 +33,7 @@ class CustomBottomNavBar extends StatelessWidget {
     final List<IconData> teamIcons = [
       Icons.home_outlined,
       Icons.task_alt_outlined,
-      Icons.check_circle_outline, // completed task
+      Icons.chat_bubble_outline, // completed task
       Icons.person_outline,
     ];
 
@@ -147,7 +149,7 @@ class CustomBottomNavBar extends StatelessWidget {
           page = const TeamMemberHomeScreen(); // Task
           break;
         case 2:
-          page = const CompletedTaskScreen(); // ✅ Completed Task page
+          page = const TeamMemberMessageScreen(); // ✅ Completed Task page
           break;
         case 3:
           page = const ProfileScreen(); // Profile

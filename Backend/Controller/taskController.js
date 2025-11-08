@@ -4,6 +4,13 @@ import Client from "../Models/Client.js";
 import SubCompany from "../Models/SubCompany.js";
 import User from "../Models/userSchema.js";
 import TaskAssignment from "../Models/TaskAssignment.js"; 
+import {
+  pushToUsers,
+  extractAllAssignees,
+  taskAssignTitle,
+  taskAssignBody,
+} from "../service/notification.service.js";
+import { saveNotificationsForUsers } from "../utils/saveNotification.js";
  
 export const addTask = async (req, res) => {
   try {
@@ -106,6 +113,30 @@ export const addTask = async (req, res) => {
       .populate('assignedTo', 'fullName email')
       .populate('createdBy', 'fullName email');
 
+
+      const allAssignees = extractAllAssignees(task);
+
+      if (allAssignees.length) {
+  await pushToUsers({
+    userIds: allAssignees,
+    title: taskAssignTitle(task),
+    body: taskAssignBody(task, task.deadline),
+    data: {
+      type: "task_assigned",
+      taskId: String(task._id),
+      title: task.title || "",
+      deadline: task.deadline ? String(task.deadline) : "",
+    },
+  });
+
+  await saveNotificationsForUsers({
+  userIds: allAssignees,
+  title: taskAssignTitle(task),
+  message: taskAssignBody(task, task.deadline),
+  type: "task"
+});
+}
+
     return res.status(201).json({
       success: true,
       message: "Task created successfully",
@@ -142,6 +173,7 @@ export const updateTask = async (req, res) => {
     if (!task) {
       return res.status(404).json({ success: false, message: "Task not found" });
     }
+    const beforeAssignees = new Set(extractAllAssignees(task));
 
     // Update task fields
     const updateData = {
@@ -178,6 +210,29 @@ export const updateTask = async (req, res) => {
       .populate('client', 'name email phone businessName meta')
       .populate('assignedTo', 'fullName email')
       .populate('createdBy', 'fullName email');
+
+      const afterAssignees = new Set(extractAllAssignees(updatedTask));
+const newlyAdded = [...afterAssignees].filter(id => !beforeAssignees.has(id));
+
+if (newlyAdded.length) {
+  await pushToUsers({
+    userIds: newlyAdded,
+    title: taskAssignTitle(updatedTask),
+    body: taskAssignBody(updatedTask, updatedTask.deadline),
+    data: {
+      type: "task_assigned_update",
+      taskId: String(updatedTask._id),
+      title: updatedTask.title || "",
+      deadline: updatedTask.deadline ? String(updatedTask.deadline) : "",
+    },
+  });
+  await saveNotificationsForUsers({
+  userIds: newlyAdded,
+  title: taskAssignTitle(updatedTask),
+  message: taskAssignBody(updatedTask, updatedTask.deadline),
+  type:"task"
+});
+}
 
     return res.status(200).json({
       success: true,

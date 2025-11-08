@@ -10,6 +10,7 @@ import 'package:rudhram_frontend/screens/login_screen.dart';
 import 'utils/constants.dart';
 import 'services/device_service.dart';
 import 'services/local_notifications.dart'; // ⬅️ NEW
+import 'screens/task_route.dart';
 
 // Screens you already have:
 import 'screens/meeting_screen.dart';
@@ -21,21 +22,56 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // process message.data if needed
 }
 
-// Deep-link helpers
 void _handleDeepLinkData(Map<String, dynamic> data) {
-  final payload =
-      data['payload'] ?? jsonEncode({'type': data['type'], 'meetingId': data['meetingId']});
-  if (payload is String) _handleDeepLinkPayload(payload);
+  final type = (data['type'] ?? '').toString();
+
+  // 🔔 Handle all task-related server types
+
+  // ✅ NEW: Lead converted deep link
+  if (type == 'lead_converted') {
+    final clientId = data['clientId']?.toString();
+    final leadId = data['leadId']?.toString();
+    // Prefer a client screen if you have one. Example:
+    // navigatorKey.currentState?.pushNamed('/client', arguments: clientId);
+    // Fallback: navigate to a generic route with params bundle:
+    navigatorKey.currentState?.pushNamed(
+      '/task', // <-- replace with your client route if you have it
+      arguments: {
+        'deeplink': 'lead_converted',
+        'clientId': clientId,
+        'leadId': leadId,
+        'clientCode': data['clientCode']?.toString(),
+      },
+    );
+    return;
+  }
+
+  if (type == 'task' ||
+      type == 'task_assigned' ||
+      type == 'task_assigned_update' ||
+      type == 'task_deadline') {
+    final taskId = data['taskId']?.toString();
+    if (taskId != null && taskId.isNotEmpty) {
+      navigatorKey.currentState?.pushNamed('/task', arguments: taskId);
+      return;
+    }
+  }
+
+  // (existing) meeting deep-link
+  if (type == 'meeting' && data['meetingId'] != null) {
+    navigatorKey.currentState?.pushNamed(
+      '/meeting',
+      arguments: data['meetingId'],
+    );
+  }
 }
 
 void _handleDeepLinkPayload(String payload) {
   try {
     final map = jsonDecode(payload) as Map<String, dynamic>;
-    if (map['type'] == 'meeting' && map['meetingId'] != null) {
-      navigatorKey.currentState?.pushNamed('/meeting', arguments: map['meetingId']);
-    }
+    _handleDeepLinkData(map);
   } catch (_) {
-    // ignore bad payload
+    // ignore malformed payload
   }
 }
 
@@ -74,32 +110,42 @@ class _RudhramAppState extends State<RudhramApp> {
     await messaging.requestPermission(alert: true, badge: true, sound: true);
 
     // Foreground FCM debug log
-    FirebaseMessaging.onMessage.listen((m) {
-      debugPrint('📨 Foreground FCM: ${m.notification?.title} | data: ${m.data}');
-    });
+    FirebaseMessaging.onMessage.listen((message) async {
+      final notif = message.notification;
+      final data = message.data;
 
+      if (notif != null) {
+        await LocalNotifications.showBasic( 
+          title: notif.title,
+          body: notif.body,
+          // ⬅️ include taskId + type so tap can deep-link
+          payload: {
+            'type': data['type'],
+            'taskId': data['taskId'],
+            'meetingId': data['meetingId'],
+          },
+        );
+      }
+    });
     // App opened from notification (background)
     FirebaseMessaging.onMessageOpenedApp.listen((message) {
       debugPrint("📬 App opened from notification: ${message.data}");
       _handleDeepLinkData(message.data);
     });
 
-    // Show a local notification for foreground FCM
-    FirebaseMessaging.onMessage.listen((message) async {
-      final notif = message.notification;
-      final data = message.data;
+    // // Show a local notification for foreground FCM
+    // FirebaseMessaging.onMessage.listen((message) async {
+    //   final notif = message.notification;
+    //   final data = message.data;
 
-      if (notif != null) {
-        await LocalNotifications.showBasic(
-          title: notif.title,
-          body: notif.body,
-          payload: {
-            'type': data['type'],
-            'meetingId': data['meetingId'],
-          },
-        );
-      }
-    });
+    //   if (notif != null) {
+    //     await LocalNotifications.showBasic(
+    //       title: notif.title,
+    //       body: notif.body,
+    //       payload: {'type': data['type'], 'meetingId': data['meetingId']},
+    //     );
+    //   }
+    // });
 
     // Tapped from terminated
     final initial = await FirebaseMessaging.instance.getInitialMessage();
@@ -121,6 +167,7 @@ class _RudhramAppState extends State<RudhramApp> {
       routes: {
         '/login': (_) => const LoginScreen(),
         '/meeting': (_) => const MeetingScreen(),
+        '/task': (_) => const TaskRoute(),
       },
     );
   }

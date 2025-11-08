@@ -11,6 +11,7 @@ import '../utils/api_config.dart';
 import '../utils/snackbar_helper.dart';
 import 'package:awesome_snackbar_content/awesome_snackbar_content.dart';
 import 'login_screen.dart';
+import 'package:rudhram_frontend/services/device_service.dart'; // ⬅️ keeps logout device cleanup
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -68,11 +69,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final avatar = (u['avatarUrl'] ?? '').toString();
         final cacheKey = (u['updatedAt'] ?? DateTime.now().toIso8601String())
             .toString();
-        if (avatar.isNotEmpty && avatar.startsWith('/')) {
-          u['avatarUrl'] = _absUrl(avatar, cacheKey: cacheKey);
-        } else if (avatar.isNotEmpty) {
+
+        // Normalize avatar URL
+        if (avatar.isNotEmpty) {
           u['avatarUrl'] = _absUrl(avatar, cacheKey: cacheKey);
         }
+
+        // Normalize birthdate to ISO if backend already sends Date
+        // (we keep whatever server sends; formatting happens in UI)
         if (mounted) setState(() => userData = u);
       } else {
         throw Exception("Fetch failed (${res.statusCode})");
@@ -90,8 +94,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _logout() async {
+    try {
+      await DeviceService.logoutCleanup();
+    } catch (_) {}
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
+
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
@@ -100,16 +108,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  /// -------- EDIT PROFILE DIALOG (beautiful & professional) --------
+  /// -------- EDIT PROFILE DIALOG (now available for ALL roles) --------
   Future<void> _editProfileDialog() async {
-    // Guard: only SUPER_ADMIN can edit
-    if (!_isEditableRole) return;
     if (userData == null) return;
 
     final nameController = TextEditingController(text: userData?['fullName']);
     final emailController = TextEditingController(text: userData?['email']);
     final phoneController = TextEditingController(text: userData?['phone']);
     final passwordController = TextEditingController();
+
+    // Birthdate handling
+    DateTime? selectedDob;
+    final rawDob = userData?['birthdate'];
+    if (rawDob != null && rawDob.toString().trim().isNotEmpty) {
+      try {
+        selectedDob = DateTime.parse(rawDob.toString());
+      } catch (_) {
+        selectedDob = null;
+      }
+    }
+    final dobController = TextEditingController(
+      text: selectedDob != null
+          ? _formatDate(selectedDob.toIso8601String())
+          : '',
+    );
 
     File? tempAvatarFile;
     bool saving = false;
@@ -133,6 +155,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
               }
             }
 
+            Future<void> pickDob() async {
+              if (saving) return;
+              final now = DateTime.now();
+              final initial =
+                  selectedDob ??
+                  DateTime(
+                    now.year - 20,
+                    now.month,
+                    now.day,
+                  ); // sensible default
+              final first = DateTime(1950, 1, 1);
+              final last = DateTime(now.year, now.month, now.day);
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: initial.isAfter(last) ? last : initial,
+                firstDate: first,
+                lastDate: last,
+              );
+              if (picked != null) {
+                setLocalState(() {
+                  selectedDob = picked;
+                  dobController.text = _formatDate(picked.toIso8601String());
+                });
+              }
+            }
+
             Future<void> onSave() async {
               if (saving) return;
               setLocalState(() => saving = true);
@@ -142,7 +190,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 emailController.text.trim(),
                 phoneController.text.trim(),
                 passwordController.text,
-                tempAvatarFile,
+                avatarFile: tempAvatarFile,
+                birthdateIso: selectedDob?.toIso8601String(),
               );
 
               setLocalState(() => saving = false);
@@ -173,12 +222,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       padding: const EdgeInsets.fromLTRB(20, 18, 14, 14),
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [Color(0xFFB87333), Color(0xFFD1A574)],
+                          colors: [Color(0xFFB87333),Color(0xFFB87333)],
                           begin: Alignment.centerLeft,
                           end: Alignment.centerRight,
                         ),
                       ),
                       child: Row(
+                        
                         children: [
                           const Icon(
                             Icons.manage_accounts,
@@ -286,6 +336,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               keyboardType: TextInputType.phone,
                               enabled: !saving,
                             ),
+
+                            // Birthdate picker (read-only text field)
+                            GestureDetector(
+                              onTap: saving ? null : pickDob,
+                              child: AbsorbPointer(
+                                absorbing: true,
+                                child: _prettyField(
+                                  controller: dobController,
+                                  label: "Birthdate (DD-MM-YYYY)",
+                                  icon: Icons.cake_outlined,
+                                  enabled: !saving,
+                                ),
+                              ),
+                            ),
+
                             _prettyField(
                               controller: passwordController,
                               label: "New Password (optional)",
@@ -378,9 +443,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     String name,
     String email,
     String phone,
-    String password, [
+    String password, {
     File? avatarFile,
-  ]) async {
+    String? birthdateIso,
+  }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
@@ -395,7 +461,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return false;
       }
 
-      final uri = Uri.parse("${ApiConfig.baseUrl}/user/superadmin/$id");
+      // Allow ALL roles to edit their own profile.
+      final roleUpper = (userData?['role'] ?? '').toString().toUpperCase();
+      final isSuperAdmin = roleUpper == 'SUPER_ADMIN';
+
+      // Non-super-admins update themselves; Super Admins keep your elevated route.
+      final uri = Uri.parse(
+        "${ApiConfig.baseUrl}${isSuperAdmin ? "/user/superadmin/$id" : "/user/me"}",
+      );
+
       final request = http.MultipartRequest('PUT', uri);
       request.headers['Authorization'] = "Bearer $token";
 
@@ -403,6 +477,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (email.isNotEmpty) request.fields['email'] = email;
       if (phone.isNotEmpty) request.fields['phone'] = phone;
       if (password.isNotEmpty) request.fields['password'] = password;
+
+      if (birthdateIso != null && birthdateIso.trim().isNotEmpty) {
+        final onlyDate = _toYyyyMmDd(birthdateIso);
+        request.fields['birthDate'] = onlyDate; // Your backend parameter
+      }
 
       if (avatarFile != null) {
         request.files.add(
@@ -421,8 +500,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
 
       if (res.statusCode == 200) {
-        if (decoded != null && decoded['superAdmin'] != null) {
-          final updated = Map<String, dynamic>.from(decoded['superAdmin']);
+        // Accept either `superAdmin` (your old response) or `user` (typical /me response)
+        final updatedRaw = decoded?['superAdmin'] ?? decoded?['user'];
+        if (updatedRaw != null) {
+          final updated = Map<String, dynamic>.from(updatedRaw);
           final rawAvatar = (updated['avatarUrl'] ?? '').toString();
           final cacheKey =
               (updated['updatedAt'] ?? DateTime.now().toIso8601String())
@@ -471,10 +552,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   // ---- Role helpers ----
-  bool get _isEditableRole {
-    final r = (userData?['role'] ?? '').toString().toUpperCase();
-    return r == 'SUPER_ADMIN';
-  }
+  // Now everyone can edit.
+ bool get _isEditableRole {
+  final r = (userData?['role'] ?? '').toString().toUpperCase();
+  return r == 'SUPER_ADMIN';
+}
 
   String _formatRole(dynamic role) {
     final r = (role ?? '').toString().toUpperCase();
@@ -492,6 +574,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return "${d.day.toString().padLeft(2, '0')}-${d.month.toString().padLeft(2, '0')}-${d.year}";
     } catch (_) {
       return date.toString();
+    }
+  }
+
+  String _toYyyyMmDd(String iso) {
+    try {
+      final d = DateTime.parse(iso);
+      final mm = d.month.toString().padLeft(2, '0');
+      final dd = d.day.toString().padLeft(2, '0');
+      return "${d.year}-$mm-$dd";
+    } catch (_) {
+      // Fallback: return as-is
+      return iso;
     }
   }
 
@@ -519,10 +613,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         child: Column(
                           children: [
                             const SizedBox(height: 10),
-                            // Avatar (tap only for SUPER_ADMIN)
+                            // Avatar (tap opens edit for ALL roles now)
                             Center(
                               child: GestureDetector(
-                                onTap: canEdit ? _editProfileDialog : null,
+                                onTap: _isEditableRole ? _editProfileDialog : null,
                                 child: Stack(
                                   children: [
                                     CircleAvatar(
@@ -634,6 +728,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               userData?['phone'],
                             ),
                             _buildDetailCard(
+                              Icons.cake_outlined,
+                              "Birthdate",
+                              userData?['birthDate'] == null ||
+                                      userData!['birthDate'].toString().isEmpty
+                                  ? null
+                                  : _formatDate(userData!['birthDate']),
+                            ),
+                            _buildDetailCard(
                               Icons.admin_panel_settings_outlined,
                               "Role",
                               _formatRole(userData?['role']),
@@ -680,7 +782,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       onTap: (index) {},
                       userRole: userData?['role'] ?? '',
                     ),
-                   ],
+                  ],
                 ),
         ),
       ),

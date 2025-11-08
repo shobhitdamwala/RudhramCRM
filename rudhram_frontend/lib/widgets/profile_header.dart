@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../utils/constants.dart';
 import '../screens/profile_screen.dart'; // <-- Import your Profile Screen here
+import '../screens/notification_screen.dart'; // add this import
+
 
 class ProfileHeader extends StatelessWidget {
   final String? avatarUrl;
@@ -79,22 +81,25 @@ class ProfileHeader extends StatelessWidget {
                   ),
                   onPressed: onBack ?? () => Navigator.pop(context),
                 ),
-              IconButton(
-                icon: const Icon(
-                  Icons.notifications_none,
-                  color: Colors.brown,
-                  size: 26,
-                ),
-                onPressed: onNotification ??
-                    () {
-                      // Default behavior
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('No new notifications'),
-                        ),
-                      );
-                    },
-              ),
+          IconButton(
+  icon: const Icon(
+    Icons.notifications_none,
+    color: Colors.brown,
+    size: 26,
+  ),
+  onPressed: () {
+    // call parent's hook if any (analytics, etc.)
+    if (onNotification != null) onNotification!();
+
+    // always navigate
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const NotificationCenterScreen()),
+    );
+  },
+),
+
+
             ],
           ),
         ],

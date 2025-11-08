@@ -40,6 +40,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, List<dynamic>> tasksByDate = {};
   DateTime calendarMonth = DateTime.now(); // currently displayed month
 
+  // Event marker colors (subtle, professional)
+  static const Color kMeetingDotColor = Color(0xFFE53935); // red-600
+  static const Color kTaskDotColor = Color(0xFF1E88E5); // blue-600
+
   // -----------------------------
   // Leads state (NEW)
   // -----------------------------
@@ -161,37 +165,69 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> fetchSubCompanies(String token) async {
-    final response = await http.get(
-      Uri.parse("${ApiConfig.baseUrl}/subcompany/getsubcompany"),
-      headers: {"Authorization": "Bearer $token"},
+  final response = await http.get(
+    Uri.parse("${ApiConfig.baseUrl}/subcompany/getsubcompany"),
+    headers: {"Authorization": "Bearer $token"},
+  );
+
+  if (response.statusCode == 200) {
+    final body = jsonDecode(response.body);
+    final list = List<Map<String, dynamic>>.from(
+      (body['data'] ?? body['subCompanies'] ?? []) as List,
     );
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      setState(() => subCompanies = data['data']);
-    }
+    // ✅ make every logoUrl absolute once here
+    final normalized = list.map((m) {
+      final map = Map<String, dynamic>.from(m);
+      final raw = (map['logoUrl'] ?? '').toString();
+      map['logoUrl'] = _absUrl(raw); // uses your helper
+      return map;
+    }).toList();
+
+    if (mounted) setState(() => subCompanies = normalized);
   }
+}
+
 
   Future<void> fetchTeamMembers(String token) async {
-    final response = await http.get(
-      Uri.parse("${ApiConfig.baseUrl}/user/team-members"),
+  try {
+    final res = await http.get(
+      Uri.parse("${ApiConfig.baseUrl}/user/users"),
       headers: {"Authorization": "Bearer $token"},
     );
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      setState(() {
-        teamMembers = (data['teamMembers'] as List).map((m) {
-          final member = Map<String, dynamic>.from(m);
-          final avatarUrl = member['avatarUrl']?.toString() ?? '';
-          if (avatarUrl.startsWith('/uploads')) {
-            member['avatarUrl'] = "${ApiConfig.imageBaseUrl}$avatarUrl";
-          }
-          return member;
-        }).toList();
-      });
+    if (res.statusCode != 200) {
+      // fall back to empty list on error
+      setState(() => teamMembers = const []);
+      return;
     }
+
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final List<dynamic> raw = List<dynamic>.from(body['data'] ?? []);
+
+    // Keep TEAM_MEMBER + ADMIN; exclude SUPER_ADMIN (and anything else)
+    final filtered = raw.where((u) {
+      final role = (u is Map && u['role'] != null)
+          ? u['role'].toString().toUpperCase()
+          : '';
+      return role == 'TEAM_MEMBER' || role == 'ADMIN';
+    }).map((u) {
+      final m = Map<String, dynamic>.from(u as Map);
+      final avatar = (m['avatarUrl'] ?? '').toString();
+      // normalize to absolute url for images
+      m['avatarUrl'] = _absUrl(avatar);
+      return m;
+    }).toList();
+
+    if (!mounted) return;
+    setState(() {
+      teamMembers = filtered;
+    });
+  } catch (e) {
+    if (!mounted) return;
+    setState(() => teamMembers = const []);
   }
+}
 
   /// -----------------------------
   /// Calendar: fetch meetings & tasks
@@ -652,7 +688,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                 print("🔔 Notification tapped");
                               },
                             ),
-
                             const SizedBox(height: 15),
 
                             /// 🔹 Meeting Card (Static)
@@ -734,48 +769,43 @@ class _HomeScreenState extends State<HomeScreen> {
                                             width: itemWidth,
                                             child: Column(
                                               children: [
-                                                Container(
-                                                  width: itemWidth * 1.4,
-                                                  height: itemWidth * 1.4,
-                                                  decoration: BoxDecoration(
-                                                    shape: BoxShape.circle,
-                                                    color: Colors.white,
-                                                    boxShadow: [
-                                                      BoxShadow(
-                                                        color: Colors.black
-                                                            .withOpacity(0.08),
-                                                        blurRadius: 4,
-                                                        offset: const Offset(
-                                                          0,
-                                                          2,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  child: ClipOval(
-                                                    child:
-                                                        sub['logoUrl'] != null
-                                                        ? Image.network(
-                                                            sub['logoUrl'],
-                                                            fit: BoxFit.cover,
-                                                            errorBuilder:
-                                                                (
-                                                                  _,
-                                                                  __,
-                                                                  ___,
-                                                                ) => const Icon(
-                                                                  Icons
-                                                                      .image_not_supported,
-                                                                  color: Colors
-                                                                      .grey,
-                                                                ),
-                                                          )
-                                                        : const Icon(
-                                                            Icons.business,
-                                                            color: Colors.brown,
-                                                          ),
-                                                  ),
-                                                ),
+                                                // ✅ NEW AVATAR BLOCK (paste here)
+Container(
+  width: itemWidth * 1.4,
+  height: itemWidth * 1.4,
+  decoration: BoxDecoration(
+    shape: BoxShape.circle,
+    color: Colors.white,
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withOpacity(0.08),
+        blurRadius: 4,
+        offset: const Offset(0, 2),
+      ),
+    ],
+  ),
+  child: Padding(
+    padding: const EdgeInsets.all(6),
+    child: ClipOval(
+      child: (sub['logoUrl'] != null && sub['logoUrl'].toString().isNotEmpty)
+          ? Image.network(
+              sub['logoUrl'],
+              fit: BoxFit.contain, // <- important for square logos
+              errorBuilder: (_, __, ___) => Container(
+                color: Colors.brown.shade50,
+                alignment: Alignment.center,
+                child: const Icon(Icons.image_not_supported, color: Colors.grey),
+              ),
+            )
+          : Container(
+              color: Colors.brown.shade50,
+              alignment: Alignment.center,
+              child: const Icon(Icons.business, color: Colors.brown),
+            ),
+    ),
+  ),
+),
+
                                                 const SizedBox(height: 4),
                                                 Text(
                                                   sub['name'] ?? '',
@@ -808,62 +838,50 @@ class _HomeScreenState extends State<HomeScreen> {
 
                             const SizedBox(height: 20),
 
-                            /// 🔹 Lead Section (UPDATED: dynamic counts, big number, no star icons)
+                            /// 🔹 Lead Section (clean, theme-matched: number in card, label below)
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                // Leads (status=new)
                                 Expanded(
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) =>
-                                              const LeadListScreen(),
-                                        ),
-                                      );
-                                    },
-                                    child: _LeadCountCard(
-                                      label: "Leads",
-                                      count: leadsNewCount,
-                                      labelColor: Colors.brown,
+                                  child: LeadMetricCard(
+                                    count: leadsNewCount,
+                                    label: "Leads",
+                                    accent:
+                                        AppColors.primaryColor, // theme color
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => const LeadListScreen(),
+                                      ),
                                     ),
                                   ),
                                 ),
+                                const SizedBox(width: 10),
                                 Expanded(
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              const OnboardLeadScreen(),
-                                        ),
-                                      );
-                                    },
-                                    child: _LeadCountCard(
-                                      label: "Onboard",
-                                      count: onboardCount,
-                                      labelColor: Colors.orange.shade700,
+                                  child: LeadMetricCard(
+                                    count: onboardCount,
+                                    label: "Onboard",
+                                    accent: AppColors.primaryColor,// a refined brown/copper touch
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const OnboardLeadScreen(),
+                                      ),
                                     ),
                                   ),
                                 ),
+                                const SizedBox(width: 10),
                                 Expanded(
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              const ActiveLeadScreen(),
-                                        ),
-                                      );
-                                    },
-                                    child: _LeadCountCard(
-                                      label: "Active",
-                                      count: activeCount,
-                                      labelColor: Colors.green.shade700,
+                                  child: LeadMetricCard(
+                                    count: activeCount,
+                                    label: "Active",
+                                    accent: AppColors.primaryColor,
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const ActiveLeadScreen(),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -917,181 +935,173 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Calendar widget (responsive + dynamic markers)
-  Widget _buildCalendar() {
-    final monthStart = DateTime(calendarMonth.year, calendarMonth.month, 1);
-    final firstWeekday = monthStart.weekday % 7; // make Sunday = 0
-    final daysInMonth = DateUtils.getDaysInMonth(
-      calendarMonth.year,
-      calendarMonth.month,
-    );
-    final totalTiles = firstWeekday + daysInMonth;
-    final weeks = (totalTiles / 7).ceil();
+ /// Calendar widget (responsive + dynamic markers with legend)
+/// Calendar widget (legend at the bottom)
+Widget _buildCalendar() {
+  final monthStart = DateTime(calendarMonth.year, calendarMonth.month, 1);
+  final firstWeekday = monthStart.weekday % 7; // make Sunday = 0
+  final daysInMonth = DateUtils.getDaysInMonth(
+    calendarMonth.year,
+    calendarMonth.month,
+  );
+  final totalTiles = firstWeekday + daysInMonth;
+  final weeks = (totalTiles / 7).ceil();
 
-    final dayFormatter = DateFormat('yyyy-MM-dd');
+  final dayFormatter = DateFormat('yyyy-MM-dd');
+  final todayKey = dayFormatter.format(DateTime.now());
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          // header with month navigation
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              IconButton(
-                onPressed: () => _changeMonth(-1),
-                icon: const Icon(Icons.chevron_left, color: Colors.brown),
+  return Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.08),
+          blurRadius: 6,
+          offset: const Offset(0, 2),
+        ),
+      ],
+    ),
+    child: Column(
+      children: [
+        // header with month navigation
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            IconButton(
+              onPressed: () => _changeMonth(-1),
+              icon: const Icon(Icons.chevron_left, color: Colors.brown),
+            ),
+            Text(
+              DateFormat('MMMM yyyy').format(calendarMonth),
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.brown,
               ),
-              Text(
-                DateFormat('MMMM yyyy').format(calendarMonth),
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.brown,
-                ),
-              ),
-              IconButton(
-                onPressed: () => _changeMonth(1),
-                icon: const Icon(Icons.chevron_right, color: Colors.brown),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          // weekday labels
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-                .map(
-                  (d) => Expanded(
-                    child: Center(
-                      child: Text(
-                        d,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey,
-                        ),
+            ),
+            IconButton(
+              onPressed: () => _changeMonth(1),
+              icon: const Icon(Icons.chevron_right, color: Colors.brown),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+
+        // weekday labels
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+              .map(
+                (d) => Expanded(
+                  child: Center(
+                    child: Text(
+                      d,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey,
                       ),
                     ),
                   ),
-                )
-                .toList(),
-          ),
-          const SizedBox(height: 8),
+                ),
+              )
+              .toList(),
+        ),
+        const SizedBox(height: 8),
 
-          // days grid
-          Column(
-            children: List.generate(weeks, (weekIndex) {
-              return Row(
-                children: List.generate(7, (weekdayIndex) {
-                  final tileIndex = weekIndex * 7 + weekdayIndex;
-                  final dayNumber = tileIndex - firstWeekday + 1;
-                  final bool inMonth =
-                      dayNumber >= 1 && dayNumber <= daysInMonth;
-                  if (!inMonth) {
-                    return Expanded(child: SizedBox(height: 48));
-                  }
+        // days grid
+        Column(
+          children: List.generate(weeks, (weekIndex) {
+            return Row(
+              children: List.generate(7, (weekdayIndex) {
+                final tileIndex = weekIndex * 7 + weekdayIndex;
+                final dayNumber = tileIndex - firstWeekday + 1;
+                final bool inMonth = dayNumber >= 1 && dayNumber <= daysInMonth;
 
-                  final date = DateTime(
-                    calendarMonth.year,
-                    calendarMonth.month,
-                    dayNumber,
-                  );
-                  final key = dayFormatter.format(date);
-                  final hasMeeting = (meetingsByDate[key] ?? []).isNotEmpty;
-                  final hasTask = (tasksByDate[key] ?? []).isNotEmpty;
+                if (!inMonth) {
+                  return const Expanded(child: SizedBox(height: 56));
+                }
 
-                  return Expanded(
-                    child: InkWell(
-                      onTap: () => _showDateDetails(date),
-                      child: Container(
-                        height: 56,
-                        margin: const EdgeInsets.all(4),
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 6,
-                          horizontal: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color:
-                              DateFormat('yyyy-MM-dd').format(DateTime.now()) ==
-                                  key
-                              ? AppColors.primaryColor.withOpacity(0.08)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Text(
-                              '$dayNumber',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color:
-                                    DateFormat(
-                                          'yyyy-MM-dd',
-                                        ).format(DateTime.now()) ==
-                                        key
-                                    ? AppColors.primaryColor
-                                    : Colors.brown,
-                                fontWeight:
-                                    DateFormat(
-                                          'yyyy-MM-dd',
-                                        ).format(DateTime.now()) ==
-                                        key
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                              ),
+                final date = DateTime(
+                  calendarMonth.year,
+                  calendarMonth.month,
+                  dayNumber,
+                );
+                final key = dayFormatter.format(date);
+
+                final hasMeeting = (meetingsByDate[key] ?? []).isNotEmpty;
+                final hasTask = (tasksByDate[key] ?? []).isNotEmpty;
+                final isToday = key == todayKey;
+
+                return Expanded(
+                  child: InkWell(
+                    onTap: () => _showDateDetails(date),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      height: 56,
+                      margin: const EdgeInsets.all(4),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 6,
+                        horizontal: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isToday
+                            ? AppColors.primaryColor.withOpacity(0.08)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Text(
+                            '$dayNumber',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: isToday
+                                  ? AppColors.primaryColor
+                                  : Colors.brown,
+                              fontWeight:
+                                  isToday ? FontWeight.bold : FontWeight.w500,
                             ),
-                            const SizedBox(height: 6),
-                            // markers row
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                if (hasMeeting)
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: const BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.red,
-                                    ),
-                                  ),
-                                if (hasMeeting && hasTask)
-                                  const SizedBox(width: 6),
-                                if (hasTask)
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: const BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.blue,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              if (hasMeeting)
+                                const _EventDot(color: kMeetingDotColor),
+                              if (hasMeeting && hasTask)
+                                const SizedBox(width: 6),
+                              if (hasTask)
+                                const _EventDot(color: kTaskDotColor),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
-                  );
-                }),
-              );
-            }),
-          ),
-        ],
-      ),
-    );
-  }
+                  ),
+                );
+              }),
+            );
+          }),
+        ),
+
+        // legend at the very bottom
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            _LegendItem(color: kMeetingDotColor, label: "Meeting"),
+            SizedBox(width: 20),
+            _LegendItem(color: kTaskDotColor, label: "Task"),
+          ],
+        ),
+      ],
+    ),
+  );
+}
 
   /// Team members row (unchanged)
   Widget _buildTeamRow() {
@@ -1242,6 +1252,148 @@ class _HomeScreenState extends State<HomeScreen> {
       if (lowerSet.contains(s)) c++;
     }
     return c;
+  }
+}
+
+
+
+/// Small colored dot for event markers
+class _EventDot extends StatelessWidget {
+  final Color color;
+  const _EventDot({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+      ),
+    );
+  }
+}
+
+/// Legend item (dot + label)
+class _LegendItem extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendItem({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12.5,
+            color: Colors.black87,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Apple Calendar–style metric tile:
+/// - perfect square (width == height)
+/// - label on top (same color for all)
+/// - big number centered
+class LeadMetricCard extends StatelessWidget {
+  final int count;
+  final String label;
+  final Color accent; // still used for border shadow tone
+  final VoidCallback? onTap;
+
+  const LeadMetricCard({
+    super.key,
+    required this.count,
+    required this.label,
+    required this.accent,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final side = constraints.maxWidth;          // make it a square
+          final numberSize = side * 0.44;             // big digit
+          final labelSize  = side * 0.13;             // smaller label
+          final borderColor = accent.withOpacity(0.28);
+          final shadowColor = Colors.black.withOpacity(0.06);
+
+          return Container(
+            width: double.infinity,
+            height: side,                              // ← square
+            decoration: BoxDecoration(
+              color: Colors.white,                    // white background
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: borderColor, width: 1),
+              boxShadow: [
+                BoxShadow(
+                  color: shadowColor,
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // label on top (same color for all three tiles)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    label.toUpperCase(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: labelSize,
+                      fontWeight: FontWeight.w500,          // thin/clean
+                      letterSpacing: 0.6,
+                      color: const Color.fromARGB(255, 243, 30, 30),         // SAME color
+                    ),
+                  ),
+                ),
+
+                // big animated number
+                TweenAnimationBuilder<double>(
+                  tween: Tween<double>(begin: 0, end: count.toDouble()),
+                  duration: const Duration(milliseconds: 450),
+                  curve: Curves.easeOutCubic,
+                  builder: (_, value, __) => Text(
+                    "${value.round()}",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: numberSize,
+                      fontWeight: FontWeight.w400,
+                      height: 1.0,
+                      letterSpacing: -0.5,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 }
 

@@ -44,6 +44,21 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     'high': Colors.red,
   };
 
+  int _autoProgressForStatus(String status) {
+    switch (status) {
+      case 'not_started':
+        return 0;
+      case 'in_progress':
+        return 20;
+      case 'review':
+        return 80;
+      case 'done':
+        return 100;
+      default:
+        return 0;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -265,27 +280,26 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     }
   }
 
-  void _checkDeadlines() {
-    final now = DateTime.now();
-    final upcomingDeadlines = assignedTasks.where((task) {
-      if (task['deadline'] == null) return false;
-      try {
-        final deadline = DateTime.parse(task['deadline']).toLocal();
-        final difference = deadline.difference(now);
-        return difference.inDays <= 3 && difference.inDays >= 0;
-      } catch (_) {
-        return false;
-      }
-    }).toList();
-
-    setState(() {
-      deadlineTasks = upcomingDeadlines;
-    });
-
-    if (deadlineTasks.isNotEmpty) {
-      _showDeadlineNotification();
+ void _checkDeadlines() {
+  final now = DateTime.now();
+  final upcomingDeadlines = assignedTasks.where((task) {
+    if (task['deadline'] == null) return false;
+    try {
+      final deadline = DateTime.parse(task['deadline']).toLocal();
+      final difference = deadline.difference(now);
+      return difference.inDays <= 3 && difference.inDays >= 0;
+    } catch (_) {
+      return false;
     }
-  }
+  }).toList();
+
+  setState(() {
+    deadlineTasks = upcomingDeadlines;
+  });
+
+  // removed snackbar logic fully
+}
+
 
   void _showDeadlineNotification() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -467,14 +481,18 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     }
   }
 
-  void _showTaskDetails(dynamic task) {
-    final myId = (userData?['_id'] ?? userData?['id'])?.toString();
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return DraggableScrollableSheet(
+ void _showTaskDetails(dynamic task) {
+  final myId = (userData?['_id'] ?? userData?['id'])?.toString();
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    useSafeArea: true, // 👈 important
+    builder: (context) {
+      final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+      return SafeArea( // 👈 protects against system navbar overlap
+        bottom: true,
+        child: DraggableScrollableSheet(
           expand: false,
           initialChildSize: 0.9,
           minChildSize: 0.5,
@@ -490,9 +508,9 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
                       if (a == null) continue;
                       if (a is String && a == myId) return true;
                       if (a is Map &&
-                          ((a['_id']?.toString() ?? a['id']?.toString()) ==
-                              myId))
+                          ((a['_id']?.toString() ?? a['id']?.toString()) == myId)) {
                         return true;
+                      }
                     }
                     return false;
                   }).toList()
@@ -501,9 +519,7 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
             return Container(
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(24),
-                ),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.15),
@@ -514,25 +530,17 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
               ),
               child: Column(
                 children: [
-                  // header gradient using AppColors.primaryColor
+                  // header (unchanged)
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 16,
-                      horizontal: 20,
-                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [
-                          AppColors.primaryColor,
-                          AppColors.primaryColor.withOpacity(0.85),
-                        ],
+                        colors: [AppColors.primaryColor, AppColors.primaryColor.withOpacity(0.85)],
                         begin: Alignment.centerLeft,
                         end: Alignment.centerRight,
                       ),
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(24),
-                      ),
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -562,8 +570,6 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
                             ],
                           ),
                         ),
-                        // ❗ Removed main task status chip here
-                        // (no chip on header now)
                       ],
                     ),
                   ),
@@ -571,40 +577,25 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
                   Expanded(
                     child: SingleChildScrollView(
                       controller: scrollController,
-                      padding: const EdgeInsets.all(16),
+                      // 👇 add bottom padding so the last buttons never sit under navbar
+                      padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Top row: show only PRIORITY chip (no main task status)
-                          Row(
-                            children: [
-                              _buildPriorityChip(task['priority'] ?? 'medium'),
-                            ],
-                          ),
+                          Row(children: [_buildPriorityChip(task['priority'] ?? 'medium')]),
                           const SizedBox(height: 16),
-
-                          // Minimal client information
-                          if (task['client'] != null)
-                            _buildClientInfoSectionMinimal(task['client']),
-
-                          // Services assigned to this user (show names)
-                          if (visibleServices.isNotEmpty)
-                            _buildServicesSectionFiltered(visibleServices),
-
-                          // Description
+                          if (task['client'] != null) _buildClientInfoSectionMinimal(task['client']),
+                          if (visibleServices.isNotEmpty) _buildServicesSectionFiltered(visibleServices),
                           if (task['description'] != null &&
                               task['description'].toString().trim().isNotEmpty)
                             _buildDescriptionSection(task['description']),
-
-                          // Deadline indicator only (no raw datetime)
-                          if (task['deadline'] != null)
-                            _buildDeadlineIndicator(task['deadline']),
-
+                          if (task['deadline'] != null) _buildDeadlineIndicator(task['deadline']),
                           const SizedBox(height: 12),
-                          // Progress box already shows the user's status nicely
                           _buildProgressSection(task),
                           const SizedBox(height: 20),
                           _buildActionButtons(task),
+                          // 👇 extra spacer (cheap insurance)
+                          SizedBox(height: bottomInset),
                         ],
                       ),
                     ),
@@ -613,10 +604,11 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
               ),
             );
           },
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 
   Widget _buildClientInfoSectionMinimal(dynamic client) {
     String name = '';
@@ -977,107 +969,114 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     );
   }
 
-  void _showStatusUpdateDialog(dynamic task) {
-    final List<String> statusOptions = [
-      'not_started',
-      'in_progress',
-      'review',
-      'done',
-      'blocked',
-    ];
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Update Task Status"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: statusOptions.map((status) {
-            return ListTile(
-              leading: Icon(Icons.circle, color: statusColors[status]),
-              title: Text(status.replaceAll('_', ' ').toUpperCase()),
-              onTap: () {
-                Navigator.pop(context);
-                updateTaskStatus(task['_id'], status, taskTitle: task['title']);
-              },
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
+void _showStatusUpdateDialog(dynamic task) {
+  final List<String> statusOptions = ['not_started','in_progress','review','done','blocked'];
 
-  void _showProgressUpdateDialog(dynamic task) {
-    int currentProgress = (task['progress'] ?? 0) as int;
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) {
-          return AlertDialog(
-            title: const Text("Update Progress"),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  "$currentProgress%",
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+  showDialog(
+    context: context,
+    builder: (context) {
+      final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+      return SafeArea( // 👈 keeps dialog clear of system bars
+        child: AlertDialog(
+          insetPadding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomInset), // 👈
+          title: const Text("Update Task Status"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: statusOptions.map((status) {
+              final autoProgress = status == 'blocked'
+                  ? (task['progress'] ?? 0) as int
+                  : _autoProgressForStatus(status);
+              return ListTile(
+                leading: Icon(Icons.circle, color: statusColors[status] ?? Colors.grey),
+                title: Text(status.replaceAll('_', ' ').toUpperCase()),
+                subtitle: Text(
+                  status == 'blocked' ? 'Progress unchanged' : 'Auto set progress to $autoProgress%',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final String taskId = task['_id']?.toString() ?? '';
+                  final String taskTitle = (task['title'] ?? 'Task').toString();
+                  if (taskId.isEmpty) return;
+                  final currentProgress = (task['progress'] ?? 0) as int;
+                  final targetProgress = status == 'blocked'
+                      ? currentProgress
+                      : _autoProgressForStatus(status);
+                  if (targetProgress != currentProgress) {
+                    await updateTaskProgress(taskId, targetProgress, taskTitle: taskTitle);
+                  }
+                  await updateTaskStatus(taskId, status, taskTitle: taskTitle);
+                },
+              );
+            }).toList(),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+void _showProgressUpdateDialog(dynamic task) {
+  int currentProgress = (task['progress'] ?? 0) as int;
+  showDialog(
+    context: context,
+    builder: (context) {
+      final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+      return SafeArea(
+        child: StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              insetPadding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomInset), // 👈
+              title: const Text("Update Progress"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text("$currentProgress%", style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  Slider(
+                    value: currentProgress.toDouble(),
+                    min: 0,
+                    max: 100,
+                    divisions: 20,
+                    onChanged: (v) => setState(() => currentProgress = v.round()),
                   ),
-                ),
-                const SizedBox(height: 16),
-                Slider(
-                  value: currentProgress.toDouble(),
-                  min: 0,
-                  max: 100,
-                  divisions: 20,
-                  onChanged: (value) =>
-                      setState(() => currentProgress = value.round()),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [0, 25, 50, 75, 100].map((value) {
-                    return Text(
-                      "$value%",
-                      style: TextStyle(
-                        fontWeight: value == currentProgress
-                            ? FontWeight.bold
-                            : FontWeight.normal,
-                        color: value == currentProgress
-                            ? AppColors.primaryColor
-                            : Colors.grey,
-                      ),
-                    );
-                  }).toList(),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [0, 25, 50, 75, 100].map((v) {
+                      return Text(
+                        "$v%",
+                        style: TextStyle(
+                          fontWeight: v == currentProgress ? FontWeight.bold : FontWeight.normal,
+                          color: v == currentProgress ? AppColors.primaryColor : Colors.grey,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    updateTaskProgress(task['_id'], currentProgress, taskTitle: task['title']);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryColor,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text("Update"),
                 ),
               ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Cancel"),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  updateTaskProgress(
-                    task['_id'],
-                    currentProgress,
-                    taskTitle: task['title'],
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primaryColor,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text("Update"),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
+            );
+          },
+        ),
+      );
+    },
+  );
+}
+
 
   Widget _buildStatusChip(String status) {
     return Container(
@@ -1335,6 +1334,31 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
                     ),
                     const SizedBox(height: 8),
                     _buildStatusChip(userStatus), // 👈 show user's status here
+                    const SizedBox(height: 10),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primaryColor,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onPressed: isThisTaskUpdating
+                            ? null
+                            : () => _showTaskDetails(task),
+                        child: const Text(
+                          "Update Status",
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -1345,7 +1369,10 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
     );
   }
 
+  // ==================== RECENT ACTIVITY (Only this section changed) ====================
   Widget _buildRecentActivitySection() {
+    if (recentTasks.isEmpty) return const SizedBox.shrink();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1354,56 +1381,134 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
           style: TextStyle(
             color: Colors.brown,
             fontWeight: FontWeight.bold,
-            fontSize: 16,
+            fontSize: 18,
           ),
         ),
         const SizedBox(height: 12),
-        ...recentTasks.map((task) => _buildRecentTaskItem(task)),
+        ...List.generate(
+          recentTasks.length,
+          (i) => _buildRecentTaskItem(recentTasks[i], index: i),
+        ),
       ],
     );
   }
 
-  Widget _buildRecentTaskItem(dynamic task) {
-    final userStatus = task['userStatus'] ?? 'not_started';
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: statusColors[userStatus] ?? Colors.grey,
-              shape: BoxShape.circle,
+  Widget _buildRecentTaskItem(dynamic task, {int index = 0}) {
+    final String userStatus = (task['userStatus'] ?? 'not_started').toString();
+    final Color c = statusColors[userStatus] ?? Colors.grey;
+
+    // Try to show a helpful timestamp if available
+    DateTime? ts;
+    final updatedAt = task['updatedAt'] ?? task['createdAt'];
+    try {
+      ts = DateTime.parse(updatedAt.toString()).toLocal();
+    } catch (_) {}
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: 240 + index * 40),
+      curve: Curves.easeOutCubic,
+      builder: (context, v, child) =>
+          Transform.translate(offset: Offset(0, (1 - v) * 10), child: Opacity(opacity: v, child: child)),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+          border: Border.all(color: c.withOpacity(0.28), width: 1),
+          gradient: LinearGradient(
+            colors: [Colors.white, c.withOpacity(0.03)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => _showTaskDetails(task), // opens details if user taps
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Left icon badge that matches app color vibe
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryColor.withOpacity(0.12),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppColors.primaryColor.withOpacity(0.4)),
+                  ),
+                  child: const Icon(Icons.task_alt_rounded, size: 16, color: AppColors.primaryColor),
+                ),
+                const SizedBox(width: 12),
+
+                // Title + timestamp
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        (task['title'] ?? 'Untitled Task').toString(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.brown,
+                          height: 1.1,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      if (ts != null)
+                        Text(
+                          DateFormat('dd MMM, h:mm a').format(ts),
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+
+                // Right status chip styled to app palette
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: c.withOpacity(0.09),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: c.withOpacity(0.55)),
+                  ),
+                  child: Text(
+                    userStatus.replaceAll('_', ' ').toUpperCase(),
+                    style: TextStyle(
+                      color: c,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: .2,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Icon(Icons.chevron_right_rounded, color: Colors.brown, size: 22),
+              ],
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              task['title'] ?? 'Untitled Task',
-              style: const TextStyle(fontSize: 14),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          Text(
-            userStatus.replaceAll('_', ' '),
-            style: TextStyle(
-              fontSize: 12,
-              color: statusColors[userStatus] ?? Colors.grey,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
+  // ==================== END Recent Activity ====================
 
   Widget _buildEmptyState() {
     return Container(
@@ -1505,8 +1610,10 @@ class _TeamMemberHomeScreenState extends State<TeamMemberHomeScreen> {
                                     .toList(),
                               ),
                             const SizedBox(height: 20),
+
                             if (recentTasks.isNotEmpty)
                               _buildRecentActivitySection(),
+
                             const SizedBox(height: 20),
                           ],
                         ),

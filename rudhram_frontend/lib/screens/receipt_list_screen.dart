@@ -247,7 +247,12 @@ class _ReceiptListScreenState extends State<ReceiptListScreen> {
   }
 
   Widget shimmerLoader() {
+    // keep last items clear of bottom nav
+    final safe = MediaQuery.of(context).viewPadding.bottom;
+    final bottomSpace = kBottomNavigationBarHeight + safe + 16;
+
     return ListView.builder(
+      padding: EdgeInsets.only(bottom: bottomSpace),
       itemCount: 4,
       itemBuilder: (context, index) {
         return Shimmer.fromColors(
@@ -255,9 +260,9 @@ class _ReceiptListScreenState extends State<ReceiptListScreen> {
           highlightColor: Colors.grey[100]!,
           child: Card(
             margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: ListTile(
-              title: Container(height: 15, color: Colors.white),
-              subtitle: Container(height: 10, color: Colors.white),
+            child: const ListTile(
+              title: SizedBox(height: 15),
+              subtitle: SizedBox(height: 10),
             ),
           ),
         );
@@ -309,24 +314,10 @@ class _ReceiptListScreenState extends State<ReceiptListScreen> {
 
             const Divider(height: 20),
 
-            // Action Buttons (2 Rows for Better Layout)
             Wrap(
               spacing: 10,
               runSpacing: 10,
               children: [
-                // ElevatedButton.icon(
-                //   onPressed: () => downloadReceiptPDF(receipt['receiptNo']),
-                //   icon: const Icon(Icons.download, size: 18),
-                //   label: const Text("Download"),
-                //   style: ElevatedButton.styleFrom(
-                //     backgroundColor: Colors.blue,
-                //     foregroundColor: Colors.white,
-                //     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                //     shape: RoundedRectangleBorder(
-                //       borderRadius: BorderRadius.circular(8),
-                //     ),
-                //   ),
-                // ),
                 ElevatedButton.icon(
                   onPressed: () => shareReceiptPDF(receipt['receiptNo']),
                   icon: const Icon(Icons.share, size: 18),
@@ -343,48 +334,6 @@ class _ReceiptListScreenState extends State<ReceiptListScreen> {
                     ),
                   ),
                 ),
-                // ElevatedButton.icon(
-                //   onPressed: () async {
-                //     final confirm = await showDialog<bool>(
-                //       context: context,
-                //       builder: (context) => AlertDialog(
-                //         title: const Text("Delete Receipt"),
-                //         content: Text(
-                //           "Are you sure you want to delete ${receipt['receiptNo']}?",
-                //         ),
-                //         actions: [
-                //           TextButton(
-                //             onPressed: () => Navigator.pop(context, false),
-                //             child: const Text("Cancel"),
-                //           ),
-                //           TextButton(
-                //             onPressed: () => Navigator.pop(context, true),
-                //             child: const Text(
-                //               "Delete",
-                //               style: TextStyle(color: Colors.red),
-                //             ),
-                //           ),
-                //         ],
-                //       ),
-                //     );
-                //     if (confirm == true) {
-                //       deleteReceipt(receipt['_id'], receipt['receiptNo']);
-                //     }
-                //   },
-                //   icon: const Icon(Icons.delete, size: 18),
-                //   label: const Text("Delete"),
-                //   style: ElevatedButton.styleFrom(
-                //     backgroundColor: Colors.redAccent,
-                //     foregroundColor: Colors.white,
-                //     padding: const EdgeInsets.symmetric(
-                //       horizontal: 16,
-                //       vertical: 10,
-                //     ),
-                //     shape: RoundedRectangleBorder(
-                //       borderRadius: BorderRadius.circular(8),
-                //     ),
-                //   ),
-                // ),
               ],
             ),
           ],
@@ -489,6 +438,9 @@ class _ReceiptListScreenState extends State<ReceiptListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final safe = MediaQuery.of(context).viewPadding.bottom;
+    final bottomSpace = kBottomNavigationBarHeight + safe + 16;
+
     return Scaffold(
       extendBody: true,
       backgroundColor: Colors.transparent,
@@ -539,6 +491,9 @@ class _ReceiptListScreenState extends State<ReceiptListScreen> {
                     : RefreshIndicator(
                         onRefresh: fetchReceipts,
                         child: ListView.builder(
+                          padding: EdgeInsets.only(
+                            bottom: bottomSpace,
+                          ), // 👈 keep last card above nav
                           itemCount: filteredReceipts.length,
                           itemBuilder: (context, i) {
                             final receipt = filteredReceipts[i];
@@ -551,10 +506,13 @@ class _ReceiptListScreenState extends State<ReceiptListScreen> {
           ),
         ),
       ),
-      bottomNavigationBar: CustomBottomNavBar(
-        currentIndex: currentIndex,
-        onTap: (i) => setState(() => currentIndex = i),
-        userRole: "admin",
+      bottomNavigationBar: SafeArea(
+        top: false, // only apply bottom inset
+        child: CustomBottomNavBar(
+          currentIndex: currentIndex,
+          onTap: (i) => setState(() => currentIndex = i),
+          userRole: "admin",
+        ),
       ),
     );
   }

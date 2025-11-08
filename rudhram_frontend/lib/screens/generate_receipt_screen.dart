@@ -1,6 +1,5 @@
 // lib/screens/generate_receipt_screen.dart
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -36,7 +35,7 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
   String? selectedInvoiceId;
   String? selectedClientId;
 
-  // Controllers (notes remains for optional notes/received-from text)
+  // Controllers
   final TextEditingController amountController = TextEditingController();
   final TextEditingController paymentTypeController = TextEditingController();
   final TextEditingController chequeNoController = TextEditingController();
@@ -80,25 +79,20 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
         Uri.parse("${ApiConfig.baseUrl}/user/me"),
         headers: {"Authorization": "Bearer $token"},
       );
-      if (res.statusCode == 200) {
+    if (res.statusCode == 200) {
         final d = jsonDecode(res.body);
         final u = Map<String, dynamic>.from(d['user'] ?? {});
-        if (u['avatarUrl'] != null &&
-            u['avatarUrl'].toString().startsWith('/')) {
+        if (u['avatarUrl'] != null && u['avatarUrl'].toString().startsWith('/')) {
           u['avatarUrl'] = _absUrl(u['avatarUrl']);
         }
         if (mounted) setState(() => userData = u);
       }
-    } catch (e) {
-      // ignore - optional
-    }
+    } catch (_) {}
   }
 
   String _cleanToken(String? token) {
     if (token == null) return '';
-    return token.startsWith('Bearer ')
-        ? token.substring(7).trim()
-        : token.trim();
+    return token.startsWith('Bearer ') ? token.substring(7).trim() : token.trim();
   }
 
   String _absUrl(String? maybeRelative) {
@@ -113,9 +107,7 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
   Future<void> _fetchInvoices() async {
     setState(() => isLoading = true);
     try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/invoice/'),
-      );
+      final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/invoice/'));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['success'] == true && data['invoices'] != null) {
@@ -133,11 +125,8 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
             }).toList();
           });
         }
-      } else {
-        // silent - optional add snackbar
       }
-    } catch (e) {
-      // optional logging
+    } catch (_) {
     } finally {
       setState(() => isLoading = false);
     }
@@ -145,16 +134,13 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
 
   Future<void> _fetchClients() async {
     try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/client/getclient'),
-      );
+      final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/client/getclient'));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
 
-        // ✅ Fix: clients are inside "data" not "clients"
+        // clients are inside "data"
         if (data['success'] == true && data['data'] != null) {
           final list = (data['data'] as List).cast<dynamic>();
-
           setState(() {
             clients = list.map<Map<String, dynamic>>((client) {
               return {
@@ -166,15 +152,9 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
               };
             }).toList();
           });
-        } else {
-          debugPrint('⚠️ No clients found or bad format: ${response.body}');
         }
-      } else {
-        debugPrint('❌ Failed to load clients: ${response.statusCode}');
       }
-    } catch (e) {
-      debugPrint('❌ Error fetching clients: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> _selectPaymentDate() async {
@@ -184,12 +164,10 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
     );
-
     if (picked != null) {
       setState(() {
         selectedPaymentDate = picked;
-        paymentDateController.text =
-            "${picked.day}/${picked.month}/${picked.year}";
+        paymentDateController.text = "${picked.day}/${picked.month}/${picked.year}";
       });
     }
   }
@@ -232,9 +210,7 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
       final token = _cleanToken(prefs.getString('auth_token'));
 
       final payload = {
-        "invoiceNo": invoices.firstWhere(
-          (inv) => inv['_id'] == selectedInvoiceId,
-        )['invoiceNo'],
+        "invoiceNo": invoices.firstWhere((inv) => inv['_id'] == selectedInvoiceId)['invoiceNo'],
         "paymentType": paymentTypeController.text.trim(),
         "chequeOrTxnNo": chequeNoController.text.trim(),
         "notes": notesController.text.trim(),
@@ -334,23 +310,7 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
     );
   }
 
-  Widget _buildDropdownField({
-    required String label,
-    required IconData icon,
-    required String? value,
-    required List<DropdownMenuItem<String>> items,
-    required void Function(String?) onChanged,
-    String? Function(String?)? validator,
-  }) {
-    return DropdownButtonFormField<String>(
-      value: value,
-      decoration: _inputDecoration(label: label, icon: icon),
-      items: items,
-      onChanged: onChanged,
-      validator: validator,
-    );
-  }
-
+  // Generic text field
   Widget _buildTextField({
     required TextEditingController controller,
     required String label,
@@ -372,8 +332,11 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Constrain dropdown item width to avoid pixel overflow
+    final double maxLabelWidth = MediaQuery.of(context).size.width - 140;
+
     return Scaffold(
-      resizeToAvoidBottomInset: false,
+      resizeToAvoidBottomInset: true,
       extendBody: true,
       body: BackgroundContainer(
         child: SafeArea(
@@ -400,22 +363,46 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
                               _buildHeader(),
                               const SizedBox(height: 20),
 
-                              // Invoice Select
-                              _buildDropdownField(
-                                label: "Select Invoice Number",
-                                icon: Icons.receipt,
+                              // ===== Invoice Select (no overflow) =====
+                              DropdownButtonFormField<String>(
                                 value: selectedInvoiceId,
+                                isExpanded: true,
+                                decoration: _inputDecoration(
+                                  label: "Select Invoice Number",
+                                  icon: Icons.receipt,
+                                ),
                                 items: invoices.map((invoice) {
+                                  final text = invoice['invoiceNo'] ?? 'Unknown';
                                   return DropdownMenuItem<String>(
                                     value: invoice['_id']?.toString(),
-                                    child: Text(
-                                      invoice['invoiceNo'] ?? 'Unknown',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
+                                    child: ConstrainedBox(
+                                      constraints: BoxConstraints(maxWidth: maxLabelWidth),
+                                      child: Text(
+                                        text,
+                                        style: const TextStyle(fontWeight: FontWeight.w600),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                   );
                                 }).toList(),
+                                selectedItemBuilder: (ctx) {
+                                  return invoices.map<Widget>((invoice) {
+                                    final text = invoice['invoiceNo'] ?? 'Unknown';
+                                    return Tooltip(
+                                      message: text,
+                                      child: Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: Text(
+                                          text,
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                          softWrap: false,
+                                        ),
+                                      ),
+                                    );
+                                  }).toList();
+                                },
                                 onChanged: (value) {
                                   setState(() => selectedInvoiceId = value);
                                   // optionally auto-fill amount from invoice:
@@ -423,35 +410,59 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
                                     (i) => i['_id'] == value,
                                     orElse: () => {},
                                   );
-                                  if (inv.isNotEmpty &&
-                                      inv['totalAmount'] != null) {
-                                    amountController.text =
-                                        (inv['totalAmount'] ?? '').toString();
+                                  if (inv.isNotEmpty && inv['totalAmount'] != null) {
+                                    amountController.text = (inv['totalAmount'] ?? '').toString();
                                   }
                                 },
-                                validator: (v) =>
-                                    v == null ? 'Please select invoice' : null,
+                                validator: (v) => v == null ? 'Please select invoice' : null,
                               ),
+
                               const SizedBox(height: 16),
 
-                              // Client dropdown (Received from)
-                              _buildDropdownField(
-                                label: "Received From (Client)",
-                                icon: Icons.person,
+                              // ===== Client dropdown (Received from) - no overflow =====
+                              DropdownButtonFormField<String>(
                                 value: selectedClientId,
+                                isExpanded: true,
+                                decoration: _inputDecoration(
+                                  label: "Received From (Client)",
+                                  icon: Icons.person,
+                                ),
                                 items: clients.map((client) {
+                                  final labelText =
+                                      "${client['name']} (${client['businessName']})";
                                   return DropdownMenuItem<String>(
                                     value: client['_id'],
-                                    child: Text(
-                                      "${client['name']} (${client['businessName']})",
-                                      style: const TextStyle(fontSize: 14),
+                                    child: ConstrainedBox(
+                                      constraints: BoxConstraints(maxWidth: maxLabelWidth),
+                                      child: Text(
+                                        labelText,
+                                        style: const TextStyle(fontSize: 14),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ),
                                   );
                                 }).toList(),
-                                onChanged: (v) =>
-                                    setState(() => selectedClientId = v),
-                                validator: (v) =>
-                                    v == null ? 'Please select client' : null,
+                                selectedItemBuilder: (ctx) {
+                                  return clients.map<Widget>((client) {
+                                    final labelText =
+                                        "${client['name']} (${client['businessName']})";
+                                    return Tooltip(
+                                      message: labelText,
+                                      child: Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: Text(
+                                          labelText,
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                          softWrap: false,
+                                        ),
+                                      ),
+                                    );
+                                  }).toList();
+                                },
+                                onChanged: (v) => setState(() => selectedClientId = v),
+                                validator: (v) => v == null ? 'Please select client' : null,
                               ),
 
                               const SizedBox(height: 16),
@@ -462,17 +473,17 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
                                 label: "Amount (₹)",
                                 icon: Icons.currency_rupee,
                                 keyboardType: TextInputType.number,
-                                validator: (v) => v == null || v.trim().isEmpty
-                                    ? 'Enter amount'
-                                    : null,
+                                validator: (v) =>
+                                    v == null || v.trim().isEmpty ? 'Enter amount' : null,
                               ),
                               const SizedBox(height: 16),
 
-                              // Payment Type -> DROPDOWN (changed)
+                              // Payment Type -> DROPDOWN
                               DropdownButtonFormField<String>(
                                 value: paymentTypeController.text.isNotEmpty
                                     ? paymentTypeController.text
                                     : null,
+                                isExpanded: true,
                                 decoration: _inputDecoration(
                                   label: "Payment Type",
                                   icon: Icons.payment,
@@ -480,19 +491,15 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
                                 items: _paymentTypes.map((t) {
                                   return DropdownMenuItem<String>(
                                     value: t,
-                                    child: Text(
-                                      t[0].toUpperCase() + t.substring(1),
-                                    ),
+                                    child: Text(t[0].toUpperCase() + t.substring(1)),
                                   );
                                 }).toList(),
                                 onChanged: (val) {
-                                  // Keep controller in sync so your payload code remains unchanged
                                   paymentTypeController.text = val ?? '';
-                                  setState(() {}); // update UI if needed
+                                  setState(() {});
                                 },
-                                validator: (v) => v == null || v.trim().isEmpty
-                                    ? 'Select payment type'
-                                    : null,
+                                validator: (v) =>
+                                    v == null || v.trim().isEmpty ? 'Select payment type' : null,
                               ),
                               const SizedBox(height: 16),
 
@@ -511,9 +518,8 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
                                 icon: Icons.calendar_today,
                                 readOnly: true,
                                 onTap: _selectPaymentDate,
-                                validator: (v) => v == null || v.trim().isEmpty
-                                    ? 'Select date'
-                                    : null,
+                                validator: (v) =>
+                                    v == null || v.trim().isEmpty ? 'Select date' : null,
                               ),
                               const SizedBox(height: 16),
 
@@ -539,13 +545,9 @@ class _GenerateReceiptScreenState extends State<GenerateReceiptScreen> {
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                   ),
-                                  onPressed: isSubmitting
-                                      ? null
-                                      : _generateReceipt,
+                                  onPressed: isSubmitting ? null : _generateReceipt,
                                   child: isSubmitting
-                                      ? const CircularProgressIndicator(
-                                          color: Colors.white,
-                                        )
+                                      ? const CircularProgressIndicator(color: Colors.white)
                                       : const Text(
                                           "Generate Receipt",
                                           style: TextStyle(

@@ -19,6 +19,7 @@ import 'package:rudhram_frontend/screens/generate_receipt_screen.dart';
 import 'package:rudhram_frontend/screens/receipt_list_screen.dart';
 import 'package:rudhram_frontend/screens/add_addon_service_screen.dart';
 import 'package:rudhram_frontend/screens/list_addon_services_screen.dart';
+import 'package:rudhram_frontend/screens/message_center_screen.dart';
 
 class QuickActionScreen extends StatefulWidget {
   const QuickActionScreen({super.key});
@@ -229,8 +230,7 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
                                         const ReceiptListScreen(),
                                   ),
                                 );
-                              } else if (action['label'] ==
-                                  "Add-On Service") {
+                              } else if (action['label'] == "Add-On Service") {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
@@ -238,13 +238,19 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
                                         const AddAddOnServiceScreen(),
                                   ),
                                 );
-                              } else if (action['label'] ==
-                                  "List Services") {
+                              } else if (action['label'] == "List Services") {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
                                     builder: (_) =>
                                         const ListAddOnServicesScreen(),
+                                  ),
+                                );
+                              } else if (action['label'] == "Messages") {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const MessageCenterScreen(),
                                   ),
                                 );
                               } else {
@@ -351,6 +357,7 @@ class _QuickActionScreenState extends State<QuickActionScreen> {
     {'icon': Icons.list_alt_outlined, 'label': "Invoice List"},
     {'icon': Icons.currency_rupee_outlined, 'label': "New Receipt"},
     {'icon': Icons.receipt_outlined, 'label': "Receipt List"},
+    {'icon': Icons.message_outlined, 'label': "Messages"},
 
     // 🔻 New actions
     {'icon': Icons.add_circle_outline, 'label': "Add-On Service"},

@@ -68,8 +68,8 @@ class _LoginScreenState extends State<LoginScreen> {
         );
 
         await Future.delayed(const Duration(seconds: 1));
-
-        if (userRole == "SUPER_ADMIN") {
+        if (userRole == "SUPER_ADMIN" || userRole == "ADMIN") {
+          // both Super Admin & Admin go home screen
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (_) => const HomeScreen()),
@@ -96,8 +96,9 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Error: $e")));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error: $e")));
     } finally {
       setState(() => isLoading = false);
     }
@@ -111,9 +112,9 @@ class _LoginScreenState extends State<LoginScreen> {
     );
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Test notification sent 🎉')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Test notification sent 🎉')));
   }
 
   @override
@@ -197,14 +198,20 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: OutlinedButton(
                       onPressed: _sendTestNotification,
                       style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: AppColors.primaryColor, width: 1.2),
+                        side: BorderSide(
+                          color: AppColors.primaryColor,
+                          width: 1.2,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
                       child: const Text(
                         'Send Test Notification',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),

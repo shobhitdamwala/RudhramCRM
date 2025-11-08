@@ -905,10 +905,12 @@ class _DriveScreenState extends State<DriveScreen> {
   }
 
   // ================= Add Bottom Sheet =================
+  // ================= Add Bottom Sheet =================
   void _showAddBottomSheet() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true, // 👈 respect system insets (gesture bar cutout, etc.)
       backgroundColor: Colors.transparent,
       builder: (_) {
         final nameCtrl = TextEditingController();
@@ -917,12 +919,22 @@ class _DriveScreenState extends State<DriveScreen> {
 
         return StatefulBuilder(
           builder: (ctx, setLocal) {
-            final bottom = MediaQuery.of(ctx).viewInsets.bottom;
+            final keyboard = MediaQuery.of(ctx).viewInsets.bottom; // when open
+            final safe = MediaQuery.of(ctx).viewPadding.bottom; // OS inset
+            const navHeight = kBottomNavigationBarHeight; // ~56px
+
             return AnimatedPadding(
+              // Only reacts to keyboard; nav/safe handled inside the container
               duration: const Duration(milliseconds: 150),
-              padding: EdgeInsets.only(bottom: bottom),
+              padding: EdgeInsets.only(bottom: keyboard),
               child: Container(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  12,
+                  16,
+                  // 👇 keep the sheet content above your bottom navbar at all times
+                  16 + safe + navHeight + 8,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: const BorderRadius.vertical(
@@ -940,6 +952,7 @@ class _DriveScreenState extends State<DriveScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // drag handle
                       Container(
                         width: 44,
                         height: 5,
@@ -1133,7 +1146,9 @@ class _DriveScreenState extends State<DriveScreen> {
               ProfileHeader(
                 avatarUrl: userData?['avatarUrl'],
                 fullName: userData?['fullName'], // Show actual user name
-                 role: formatUserRole(userData?['role']), // Show actual user role
+                role: formatUserRole(
+                  userData?['role'],
+                ), // Show actual user role
                 showBackButton: _breadcrumbs.isNotEmpty,
                 onBack: _goBack,
               ),
@@ -1146,7 +1161,6 @@ class _DriveScreenState extends State<DriveScreen> {
                 ),
                 child: Row(
                   children: [
-        
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(

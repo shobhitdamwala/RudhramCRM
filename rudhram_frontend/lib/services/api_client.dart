@@ -8,7 +8,8 @@ class ApiClient {
 }
 
 class ApiClientBase {
-  static const String baseUrl = 'http://192.168.1.20:9000/api/v1'; // <-- change
+  static const String baseUrl =
+      'http://194.238.19.57:9000/api/v1'; // <-- change
 }
 
 Future<String?> _getJwt() async {

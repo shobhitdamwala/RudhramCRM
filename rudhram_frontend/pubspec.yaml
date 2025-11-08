@@ -46,6 +46,8 @@ dependencies:
   flutter_local_notifications: ^17.2.1
   table_calendar: ^3.1.2
   flutter_animate: ^4.5.0
+  file_picker: ^8.0.0
+
 
 
 
@@ -72,17 +74,17 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: assets/logo_bottom.png
-  adaptive_icon_foreground: assets/logo_bottom.png
+  image_path: assets/mainlogo.jpg
+  adaptive_icon_foreground: assets/mainlogo.jpg
   adaptive_icon_background: "#F5E6D3"   # your app bg (beige)
   min_sdk_android: 21
 
 flutter_native_splash:
   color: "#F5E6D3"                    # same background as your theme
-  image: assets/logo_bottom.png
+  image: assets/mainlogo.jpg
   android_12:
     color: "#F5E6D3"
-    image: assets/logo_bottom.png
+    image: assets/mainlogo.jpg
   android: true
   ios: true
 
@@ -100,6 +102,7 @@ flutter:
     - assets/logo.png
     - assets/white_logo.png
     - assets/logo_bottom.png
+    - assets/icon.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

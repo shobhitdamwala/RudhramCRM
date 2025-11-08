@@ -236,7 +236,7 @@ class _GenerateInvoiceScreenState extends State<GenerateInvoiceScreen> {
           "rate": 0.0,
           "defaultQty": 1,
         });
-      } catch (e) {
+      } catch (_) {
         continue;
       }
     }
@@ -291,9 +291,7 @@ class _GenerateInvoiceScreenState extends State<GenerateInvoiceScreen> {
       selectedServiceIds.add(sid);
       invoiceItems.add({
         // keep title separate from description
-        'title':
-            service['title'] ??
-            '', // editable only for manual; for linked items we show serviceTitle
+        'title': service['title'] ?? '',
         'description': (service['description']?.toString().isNotEmpty == true
             ? service['description']
             : service['title']),
@@ -337,7 +335,6 @@ class _GenerateInvoiceScreenState extends State<GenerateInvoiceScreen> {
 
   void _updateInvoiceItem(int index, String field, dynamic value) {
     setState(() {
-      // ensure index still valid
       if (index < 0 || index >= invoiceItems.length) return;
       invoiceItems[index][field] = value;
     });
@@ -396,7 +393,6 @@ class _GenerateInvoiceScreenState extends State<GenerateInvoiceScreen> {
       final desc = (it['description'] ?? '').toString();
       final qty = int.tryParse(it['qty'].toString()) ?? -1;
       final rate = double.tryParse(it['rate'].toString()) ?? -1.0;
-      // Also allow title to be empty (will be inferred), but require description
       if (desc.isEmpty || qty <= 0 || rate < 0) {
         SnackbarHelper.show(
           context,
@@ -414,14 +410,12 @@ class _GenerateInvoiceScreenState extends State<GenerateInvoiceScreen> {
       final prefs = await SharedPreferences.getInstance();
       final token = _cleanToken(prefs.getString('auth_token'));
 
-      // Build payload: include title + description for each item
       final payload = {
         "clientId": selectedClientId,
         "subCompanyId": selectedSubCompanyId,
         "items": invoiceItems.map((item) {
           final qty = int.tryParse(item['qty'].toString()) ?? 1;
           final rate = double.tryParse(item['rate'].toString()) ?? 0.0;
-          // choose title priority: serviceTitle (linked) -> title (manual) -> first line of description
           String title = '';
           if (item['serviceTitle'] != null &&
               item['serviceTitle'].toString().isNotEmpty) {
@@ -538,6 +532,9 @@ class _GenerateInvoiceScreenState extends State<GenerateInvoiceScreen> {
   }
 
   Widget _buildInvoiceForm() {
+    final maxLabelWidth =
+        MediaQuery.of(context).size.width - 140; // safe width inside dropdown
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Form(
@@ -552,42 +549,111 @@ class _GenerateInvoiceScreenState extends State<GenerateInvoiceScreen> {
             ),
             const SizedBox(height: 16),
 
-            // Client dropdown
-            _buildDropdownField(
-              label: "Select Client",
-              icon: Icons.person_outline,
+            // Client dropdown (responsive, no overflow)
+            DropdownButtonFormField<String>(
               value: selectedClientId,
+              isExpanded: true, // << important
+              decoration: _dropdownDecoration(
+                label: "Select Client",
+                icon: Icons.person_outline,
+              ),
               items: clients.map<DropdownMenuItem<String>>((client) {
+                final text =
+                    "${client['name'] ?? 'Unknown'} — ${client['businessName'] ?? ''}";
                 return DropdownMenuItem<String>(
                   value: client['_id']?.toString() ?? '',
-                  child: Text(
-                    "${client['name'] ?? 'Unknown'} — ${client['businessName'] ?? ''}",
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: maxLabelWidth,
+                    ),
+                    child: Text(
+                      text,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 );
               }).toList(),
+              selectedItemBuilder: (ctx) {
+                return clients.map<Widget>((client) {
+                  final text =
+                      "${client['name'] ?? 'Unknown'} — ${client['businessName'] ?? ''}";
+                  return Tooltip(
+                    message: text,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        text,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
+                  );
+                }).toList();
+              },
               onChanged: (value) => _onClientChanged(value),
               validator: (value) => value == null || value.isEmpty
                   ? 'Please select a client'
                   : null,
+              icon: const Icon(Icons.arrow_drop_down, color: Colors.brown),
+              dropdownColor: Colors.white,
+              style: const TextStyle(color: Colors.brown),
             ),
+
             const SizedBox(height: 12),
 
-            // Sub-company dropdown
-            _buildDropdownField(
-              label: "Select Sub-company",
-              icon: Icons.business_center_outlined,
+            // Sub-company dropdown (responsive, no overflow)
+            DropdownButtonFormField<String>(
               value: selectedSubCompanyId,
+              isExpanded: true,
+              decoration: _dropdownDecoration(
+                label: "Select Sub-company",
+                icon: Icons.business_center_outlined,
+              ),
               items: subCompanies.map<DropdownMenuItem<String>>((company) {
+                final text = company['name']?.toString() ?? 'Unknown Company';
                 return DropdownMenuItem<String>(
                   value: company['_id']?.toString() ?? '',
-                  child: Text(company['name']?.toString() ?? 'Unknown Company'),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: maxLabelWidth,
+                    ),
+                    child: Text(
+                      text,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 );
               }).toList(),
+              selectedItemBuilder: (ctx) {
+                return subCompanies.map<Widget>((company) {
+                  final text =
+                      company['name']?.toString() ?? 'Unknown Company';
+                  return Tooltip(
+                    message: text,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        text,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
+                  );
+                }).toList();
+              },
               onChanged: (value) => _onSubCompanyChanged(value),
               validator: (value) => value == null || value.isEmpty
                   ? 'Please select a sub-company'
                   : null,
+              icon: const Icon(Icons.arrow_drop_down, color: Colors.brown),
+              dropdownColor: Colors.white,
+              style: const TextStyle(color: Colors.brown),
             ),
+
             const SizedBox(height: 12),
 
             // Due date + GST toggle
@@ -679,6 +745,7 @@ class _GenerateInvoiceScreenState extends State<GenerateInvoiceScreen> {
                               style: const TextStyle(
                                 fontWeight: FontWeight.w600,
                               ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           if (subName.isNotEmpty)
@@ -760,6 +827,23 @@ class _GenerateInvoiceScreenState extends State<GenerateInvoiceScreen> {
     );
   }
 
+  InputDecoration _dropdownDecoration({required String label, required IconData icon}) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Colors.brown),
+      prefixIcon: Icon(icon, color: Colors.brown),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Colors.brown),
+      ),
+      filled: true,
+      fillColor: Colors.white,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+    );
+  }
+
   Widget _buildSectionHeader({
     required IconData icon,
     required String title,
@@ -788,6 +872,7 @@ class _GenerateInvoiceScreenState extends State<GenerateInvoiceScreen> {
                     fontWeight: FontWeight.bold,
                     color: Colors.brown,
                   ),
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -799,37 +884,6 @@ class _GenerateInvoiceScreenState extends State<GenerateInvoiceScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildDropdownField({
-    required String label,
-    required IconData icon,
-    required String? value,
-    required List<DropdownMenuItem<String>> items,
-    required Function(String?) onChanged,
-    required String? Function(String?) validator,
-  }) {
-    return DropdownButtonFormField<String>(
-      value: value,
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: const TextStyle(color: Colors.brown),
-        prefixIcon: Icon(icon, color: Colors.brown),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.brown),
-        ),
-        filled: true,
-        fillColor: Colors.white,
-      ),
-      items: items,
-      onChanged: onChanged,
-      validator: validator,
-      icon: const Icon(Icons.arrow_drop_down, color: Colors.brown),
-      dropdownColor: Colors.white,
-      style: const TextStyle(color: Colors.brown),
     );
   }
 
@@ -861,8 +915,6 @@ class _GenerateInvoiceScreenState extends State<GenerateInvoiceScreen> {
     );
   }
 
-  // IMPORTANT: Build invoice item card WITHOUT ephemeral controllers.
-  // Use initialValue and onChanged to keep invoiceItems state as source-of-truth.
   Widget _buildInvoiceItemCard(int index, Map<String, dynamic> item) {
     final serviceTitle = item['serviceTitle']?.toString();
     final titleEditable = (serviceTitle == null || serviceTitle.isEmpty);
@@ -916,6 +968,7 @@ class _GenerateInvoiceScreenState extends State<GenerateInvoiceScreen> {
               Text(
                 serviceTitle,
                 style: const TextStyle(fontWeight: FontWeight.w700),
+                overflow: TextOverflow.ellipsis,
               ),
             ] else ...[
               const SizedBox(height: 8),
